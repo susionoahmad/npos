@@ -1,9 +1,6 @@
 {
   "cleanUrls": true,
   "rewrites": [
-    {
-      "source": "/((?!assets/|favicon.svg|manifest.json|sw.js|pwa-192.png|pwa-512.png|screenshot-desktop.png|screenshot-mobile.png).*)",
-      "destination": "/index.html"
-    }
+    { "source": "/:path*", "destination": "/index.html" }
   ]
 }
