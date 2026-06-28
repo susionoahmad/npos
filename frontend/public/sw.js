@@ -66,11 +66,12 @@ self.addEventListener('fetch', (event) => {
           cache.put(event.request, responseToCache);
         });
         return response;
-      }).catch(() => {
+      }).catch((err) => {
         // Fallback for document navigation when offline
         if (event.request.mode === 'navigate') {
           return caches.match('/index.html');
         }
+        throw err;
       });
     })
   );
