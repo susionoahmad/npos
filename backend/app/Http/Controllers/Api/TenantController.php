@@ -66,10 +66,17 @@ class TenantController extends Controller
     {
         $user = auth()->user();
         $tenant = $user->tenant;
-        if ($tenant && $tenant->stores()->count() >= $tenant->max_stores) {
-            return response()->json([
-                'message' => 'Batas maksimal cabang toko terlampaui. Silakan perbarui langganan Anda.',
-            ], 403);
+        if ($tenant) {
+            if (!$tenant->isBaseSlotActive()) {
+                return response()->json([
+                    'message' => 'Masa langganan dasar Anda telah berakhir. Silakan lakukan pembayaran perpanjangan terlebih dahulu.',
+                ], 403);
+            }
+            if ($tenant->stores()->count() >= $tenant->activeSlotStoreLimit()) {
+                return response()->json([
+                    'message' => 'Batas maksimal cabang toko terlampaui. Silakan perbarui langganan Anda.',
+                ], 403);
+            }
         }
 
         $payload = $request->validate([

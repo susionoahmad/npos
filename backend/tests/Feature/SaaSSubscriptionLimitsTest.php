@@ -143,11 +143,11 @@ class SaaSSubscriptionLimitsTest extends TestCase
 
         $tenant = Tenant::latest()->first();
 
-        // Emulate Midtrans Webhook Callback
-        $orderId = 'SUB_' . $tenant->id . '_5_' . time();
-        $serverKey = env('MIDTRANS_SERVER_KEY', 'SB-Mid-server-lh-48s0YtD3tQ30w0b-W6vG8');
+        // 1. Emulate Webhook for Base Slot (index 1)
+        $orderId = 'SUB_' . $tenant->id . '_ADDON_1_' . time();
+        $serverKey = config('services.midtrans.server_key') ?: 'SB-Mid-server-lh-48s0YtD3tQ30w0b-W6vG8';
         $statusCode = '200';
-        $grossAmount = '300000'; // 100k base + 4 extra stores * 50k = 300k
+        $grossAmount = '100000'; // base fee
         $signatureKey = hash('sha512', $orderId . $statusCode . $grossAmount . $serverKey);
 
         $response = $this->postJson('/api/payments/midtrans/callback', [
@@ -161,11 +161,26 @@ class SaaSSubscriptionLimitsTest extends TestCase
 
         $response->assertStatus(200);
 
+        // 2. Emulate Webhook for Addon Slot (index 2)
+        $orderId2 = 'SUB_' . $tenant->id . '_ADDON_2_' . time();
+        $grossAmount2 = '50000'; // addon fee
+        $signatureKey2 = hash('sha512', $orderId2 . $statusCode . $grossAmount2 . $serverKey);
+
+        $response2 = $this->postJson('/api/payments/midtrans/callback', [
+            'order_id' => $orderId2,
+            'transaction_status' => 'settlement',
+            'statusCode' => $statusCode,
+            'status_code' => $statusCode,
+            'gross_amount' => $grossAmount2,
+            'signature_key' => $signatureKey2,
+        ]);
+
+        $response2->assertStatus(200);
+
         $tenant->refresh();
         $this->assertEquals('active', $tenant->subscription_status);
-        $this->assertEquals(5, $tenant->max_stores);
+        $this->assertEquals(2, $tenant->activeSlotStoreLimit());
         $this->assertEquals(100, $tenant->max_users);
-        $this->assertNotNull($tenant->subscription_ends_at);
 
         // Now creating a 2nd store should succeed!
         $this->postJson('/api/tenant/stores', [

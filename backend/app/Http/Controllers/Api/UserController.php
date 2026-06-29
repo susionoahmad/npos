@@ -52,10 +52,18 @@ class UserController extends Controller
 
         // Enforce user limit based on subscription
         $tenant = \App\Models\Tenant::find($user->tenant_id);
-        if ($tenant && $tenant->users()->count() >= $tenant->max_users) {
-            return response()->json([
-                'message' => 'Batas maksimal pengguna terlampaui. Silakan perbarui langganan Anda.',
-            ], 403);
+        if ($tenant) {
+            if (!$tenant->isBaseSlotActive()) {
+                return response()->json([
+                    'message' => 'Masa langganan dasar Anda telah berakhir. Silakan lakukan pembayaran perpanjangan terlebih dahulu.',
+                ], 403);
+            }
+            $maxUsers = $tenant->subscription_status === 'trial' ? ($tenant->max_users ?? 3) : 100;
+            if ($tenant->users()->count() >= $maxUsers) {
+                return response()->json([
+                    'message' => 'Batas maksimal pengguna terlampaui. Silakan perbarui langganan Anda.',
+                ], 403);
+            }
         }
 
         // If owner, validate that the chosen store belongs to their tenant

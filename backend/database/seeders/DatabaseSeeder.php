@@ -37,6 +37,31 @@ class DatabaseSeeder extends Seeder
             'max_users' => 20,
         ]);
 
+        // Create Tenant Subscription Slots
+        // Slot 1 (base)
+        \App\Models\TenantSubscriptionSlot::create([
+            'tenant_id' => $tenant->id,
+            'slot_type' => 'base',
+            'slot_index' => 1,
+            'amount_paid' => 100000,
+            'starts_at' => now(),
+            'expires_at' => now()->addDays(365),
+            'status' => 'active',
+        ]);
+
+        // Addon slots (max_stores is 5, so we create 4 addon slots)
+        for ($i = 2; $i <= 5; $i++) {
+            \App\Models\TenantSubscriptionSlot::create([
+                'tenant_id' => $tenant->id,
+                'slot_type' => 'addon',
+                'slot_index' => $i,
+                'amount_paid' => 50000,
+                'starts_at' => now(),
+                'expires_at' => now()->addDays(365),
+                'status' => 'active',
+            ]);
+        }
+
         // 2. Create Stores under Tenant
         $storeMart = Store::create([
             'tenant_id' => $tenant->id,

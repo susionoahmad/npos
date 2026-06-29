@@ -178,6 +178,13 @@ async function fetchTenantStores() {
     }
     const { data } = await api.get('/tenant/stores')
     tenantStores.value = data || []
+    
+    // Also fetch fresh billing details to sync max_stores/slots limit
+    const billingRes = await api.get('/billing/overview')
+    tenant.value = billingRes.data.tenant
+    if (auth.user) {
+      auth.user.tenant = billingRes.data.tenant
+    }
   } catch (e: any) {
     error.value = 'Gagal memuat cabang toko dan perusahaan.'
   } finally {
@@ -634,6 +641,23 @@ onMounted(() => {
           <!-- TAB 2: PERUSAHAAN & CABANG (Owner only) -->
           <div v-if="activeTab === 'tenant' && auth.isOwner" class="space-y-4">
             
+            <!-- Limit & Subscription Notice Banner -->
+            <div class="bg-slate-900 text-white rounded-2xl p-5 shadow-sm space-y-3 relative overflow-hidden">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="space-y-0.5">
+                  <h3 class="font-black text-sm">Status Lisensi Cabang Toko</h3>
+                  <p class="text-[11px] text-slate-300">Dikelola berdasarkan slot aktif pada menu tagihan.</p>
+                </div>
+                <span class="text-xs bg-slate-800 text-white font-mono font-bold px-3 py-1 rounded-full border border-slate-700">
+                  Terpakai: {{ tenantStores.filter(s => s.is_license_activated).length }} / {{ tenant?.max_stores || 1 }} Slot Cabang
+                </span>
+              </div>
+              <p class="text-[11px] text-slate-400 leading-relaxed">
+                Setiap cabang toko membutuhkan 1 slot lisensi aktif. Anda dapat menambah slot baru atau memperpanjang masa aktif slot di menu
+                <router-link to="/billing" class="text-emerald-400 font-bold hover:underline font-bold">💳 Tagihan & Langganan</router-link>.
+              </p>
+            </div>
+
             <!-- Company Profile form -->
             <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
               <div>
@@ -667,7 +691,8 @@ onMounted(() => {
                 </div>
                 <button
                   type="button"
-                  class="rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 shadow-sm transition-all flex items-center gap-1"
+                  class="rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 shadow-sm transition-all flex items-center gap-1 disabled:opacity-40"
+                  :disabled="tenantStores.length >= (tenant?.max_stores || 1)"
                   @click="showAddStoreModal = true"
                 >
                   <span>+</span> Tambah Toko
