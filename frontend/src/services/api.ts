@@ -1,7 +1,23 @@
 import axios from 'axios'
 
+const getBaseURL = (): string => {
+  const envUrl = import.meta.env.VITE_API_URL
+  if (envUrl && typeof window !== 'undefined') {
+    const isLocalEnv = envUrl.includes('localhost') || envUrl.includes('127.0.0.1')
+    const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    if (isLocalEnv && !isLocalHost) {
+      return `${window.location.origin}/api`
+    }
+    return envUrl
+  }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return `${window.location.origin}/api`
+  }
+  return 'http://127.0.0.1:8000/api'
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api',
+  baseURL: getBaseURL(),
   headers: {
     'Accept': 'application/json',
     'Content-Type': 'application/json',
