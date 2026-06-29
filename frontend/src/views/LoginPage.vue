@@ -60,11 +60,21 @@ const submit = async () => {
         {{ loading ? 'Masuk...' : 'Login' }}
       </button>
 
-      <div class="text-center pt-2 border-t border-slate-100">
-        <router-link to="/register" class="text-xs text-slate-600 hover:text-slate-900 font-semibold hover:underline">
-          Daftar Toko Baru (Owner)
-        </router-link>
+      <div class="relative flex items-center gap-2 pt-1">
+        <div class="flex-1 h-px bg-slate-200"></div>
+        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">atau</span>
+        <div class="flex-1 h-px bg-slate-200"></div>
       </div>
+
+      <router-link
+        to="/register"
+        class="group flex items-center justify-center gap-2 w-full rounded-lg py-2.5 px-4 font-bold text-sm text-white transition-all duration-200 shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
+        style="background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);"
+      >
+        <span class="text-lg">🏪</span>
+        <span>Daftar Toko Baru (Owner)</span>
+        <span class="ml-auto opacity-70 group-hover:translate-x-0.5 transition-transform">→</span>
+      </router-link>
     </form>
   </div>
 </template>
