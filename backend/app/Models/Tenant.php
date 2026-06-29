@@ -12,6 +12,11 @@ class Tenant extends Model
 
     protected $fillable = [
         'name',
+        'subscription_status',
+        'trial_ends_at',
+        'subscription_ends_at',
+        'max_stores',
+        'max_users',
     ];
 
     public function stores(): HasMany

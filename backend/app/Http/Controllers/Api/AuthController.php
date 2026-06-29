@@ -109,8 +109,16 @@ class AuthController extends Controller
         ]);
 
         return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $user) {
+            $trialDays = (int) \App\Models\SystemSetting::getVal('subscription_trial_days', 14);
+            $trialStores = (int) \App\Models\SystemSetting::getVal('subscription_trial_stores_limit', 1);
+            $trialUsers = (int) \App\Models\SystemSetting::getVal('subscription_trial_users_limit', 3);
+
             $tenant = \App\Models\Tenant::create([
                 'name' => $request->company_name,
+                'subscription_status' => 'trial',
+                'trial_ends_at' => now()->addDays($trialDays),
+                'max_stores' => $trialStores,
+                'max_users' => $trialUsers,
             ]);
 
             $store = \App\Models\Store::create([

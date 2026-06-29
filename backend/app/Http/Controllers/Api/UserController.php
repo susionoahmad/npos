@@ -50,6 +50,14 @@ class UserController extends Controller
         $payload = $request->validated();
         $user = auth()->user();
 
+        // Enforce user limit based on subscription
+        $tenant = \App\Models\Tenant::find($user->tenant_id);
+        if ($tenant && $tenant->users()->count() >= $tenant->max_users) {
+            return response()->json([
+                'message' => 'Batas maksimal pengguna terlampaui. Silakan perbarui langganan Anda.',
+            ], 403);
+        }
+
         // If owner, validate that the chosen store belongs to their tenant
         if ($user->role === 'owner') {
             if (!empty($payload['store_id'])) {

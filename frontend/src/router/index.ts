@@ -20,6 +20,10 @@ import KasBesarPage from '../views/KasBesarPage.vue'
 import ReportsPage from '../views/ReportsPage.vue'
 import PurchasesPage from '../views/PurchasesPage.vue'
 import ChangePasswordPage from '../views/ChangePasswordPage.vue'
+import SuperadminDashboardPage from '../views/SuperadminDashboardPage.vue'
+import SuperadminTenantsPage from '../views/SuperadminTenantsPage.vue'
+import SuperadminSettingsPage from '../views/SuperadminSettingsPage.vue'
+import BillingPage from '../views/BillingPage.vue'
 
 /** Rute yang boleh diakses role cashier (selain /login) */
 const CASHIER_PATHS = new Set(['/', '/pos', '/orders', '/session/open', '/session/close', '/session/mutations', '/reports/cash-mutations', '/change-password'])
@@ -47,6 +51,10 @@ const router = createRouter({
     { path: '/purchases', component: PurchasesPage },
     { path: '/reports', component: ReportsPage },
     { path: '/change-password', component: ChangePasswordPage },
+    { path: '/superadmin/dashboard', component: SuperadminDashboardPage },
+    { path: '/superadmin/tenants', component: SuperadminTenantsPage },
+    { path: '/superadmin/settings', component: SuperadminSettingsPage },
+    { path: '/billing', component: BillingPage },
   ],
 })
 
@@ -87,9 +95,26 @@ router.beforeEach(async (to) => {
     return '/'
   }
 
-  // 6. Cashier route restrictions
+  // 6. Superadmin routing & restrictions
+  if (auth.user?.role === 'superadmin') {
+    if (!to.path.startsWith('/superadmin') && to.path !== '/change-password' && to.path !== '/login') {
+      return '/superadmin/dashboard'
+    }
+  } else {
+    // Non-superadmins cannot access superadmin pages
+    if (to.path.startsWith('/superadmin')) {
+      return '/'
+    }
+  }
+
+  // 7. Cashier route restrictions
   if (auth.user?.role === 'cashier' && !CASHIER_PATHS.has(to.path)) {
     return '/pos'
+  }
+
+  // 8. Billing route restrictions (only Owners can manage billing)
+  if (to.path === '/billing' && auth.user?.role !== 'owner') {
+    return '/'
   }
 
   return true

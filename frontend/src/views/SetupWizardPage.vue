@@ -73,6 +73,16 @@ const submit = async () => {
   }
 }
 
+const cancelAndLogout = async () => {
+  try {
+    await auth.logout()
+  } catch {
+    localStorage.removeItem('nessa_token')
+    auth.$reset()
+  }
+  router.push('/login')
+}
+
 const progressPercentage = computed(() => {
   return (currentStep.value / totalSteps) * 100
 })
@@ -128,7 +138,14 @@ const progressPercentage = computed(() => {
             <div v-if="fieldErrors.company_name?.length" class="text-xs text-red-700">{{ fieldErrors.company_name[0] }}</div>
           </div>
 
-          <div class="pt-4 flex justify-end">
+          <div class="pt-4 flex justify-between gap-3">
+            <button 
+              type="button" 
+              class="border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-semibold px-5 py-2.5 rounded-lg transition-all"
+              @click="cancelAndLogout"
+            >
+              ← Batal / Keluar
+            </button>
             <button 
               type="button" 
               class="bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-all"

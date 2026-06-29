@@ -25,6 +25,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login'])->name('login');
 Route::post('/register', [AuthController::class, 'register']);
+Route::post('/payments/midtrans/callback', [\App\Http\Controllers\Api\SubscriptionController::class, 'callback']);
 
 Route::middleware(['auth:sanctum', 'active.user', 'active.session'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
@@ -105,12 +106,17 @@ Route::middleware(['auth:sanctum', 'active.user', 'active.session'])->group(func
             Route::get('/superadmin/tenants', [\App\Http\Controllers\Api\SuperadminController::class, 'getTenants']);
             Route::post('/superadmin/tenants', [\App\Http\Controllers\Api\SuperadminController::class, 'createTenant']);
             Route::post('/superadmin/stores/{store}/toggle-license', [\App\Http\Controllers\Api\SuperadminController::class, 'toggleLicense']);
+            Route::get('/superadmin/settings', [\App\Http\Controllers\Api\SuperadminController::class, 'getSettings']);
+            Route::post('/superadmin/settings', [\App\Http\Controllers\Api\SuperadminController::class, 'updateSettings']);
+            Route::post('/superadmin/tenants/{tenant}/subscription', [\App\Http\Controllers\Api\SuperadminController::class, 'updateTenantSubscription']);
         });
 
         // Owner-only routes
         Route::middleware('role:owner')->group(function () {
             Route::put('/tenant', [\App\Http\Controllers\Api\TenantController::class, 'updateTenant']);
             Route::post('/tenant/stores', [\App\Http\Controllers\Api\TenantController::class, 'createStore']);
+            Route::get('/billing/overview', [\App\Http\Controllers\Api\SubscriptionController::class, 'getBillingOverview']);
+            Route::post('/billing/checkout', [\App\Http\Controllers\Api\SubscriptionController::class, 'checkout']);
         });
     });
 });

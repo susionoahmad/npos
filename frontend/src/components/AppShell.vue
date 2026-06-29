@@ -57,6 +57,27 @@ type NavItem = { to: string; label: string }
 type NavGroup = { title: string; icon: string; items: NavItem[] }
 
 const navGroups = computed<NavGroup[]>(() => {
+  if (auth.isSuperAdmin) {
+    return [
+      {
+        title: 'Platform SaaS',
+        icon: '🌐',
+        items: [
+          { to: '/superadmin/dashboard', label: '📊 Dashboard SaaS' },
+          { to: '/superadmin/tenants', label: '🏢 Kelola Tenant' },
+          { to: '/superadmin/settings', label: '⚙️ Pengaturan Langganan' },
+        ]
+      },
+      {
+        title: 'Akun Saya',
+        icon: '👤',
+        items: [
+          { to: '/change-password', label: '🔑 Ganti Password' }
+        ]
+      }
+    ]
+  }
+
   const operasional: NavItem[] = [
     { to: '/', label: '📊 Dashboard' },
     { to: '/pos', label: '🛒 POS / Kasir' },
@@ -85,17 +106,23 @@ const navGroups = computed<NavGroup[]>(() => {
       ]
     })
 
+    const dataItems = [
+      { to: '/products', label: '📦 Produk Barang' },
+      { to: '/categories', label: '🏷️ Kategori Produk' },
+      { to: '/suppliers', label: '🤝 Supplier / Pemasok' },
+      { to: '/purchases', label: '🛒 Pembelian Barang' },
+      { to: '/users', label: '👥 Pengguna Sistem' },
+      { to: '/settings', label: '⚙️ Pengaturan Toko' },
+    ]
+
+    if (auth.isOwner) {
+      dataItems.push({ to: '/billing', label: '💳 Tagihan & Langganan' })
+    }
+
     groups.push({
       title: 'Manajemen Data',
       icon: '📦',
-      items: [
-        { to: '/products', label: '📦 Produk Barang' },
-        { to: '/categories', label: '🏷️ Kategori Produk' },
-        { to: '/suppliers', label: '🤝 Supplier / Pemasok' },
-        { to: '/purchases', label: '🛒 Pembelian Barang' },
-        { to: '/users', label: '👥 Pengguna Sistem' },
-        { to: '/settings', label: '⚙️ Pengaturan Toko' },
-      ]
+      items: dataItems
     })
   } else {
     groups.push({
@@ -173,6 +200,14 @@ watch(
 type BottomItem = { to: string; label: string; icon: string }
 
 const mobileBottomItems = computed<BottomItem[]>(() => {
+  if (auth.isSuperAdmin) {
+    return [
+      { to: '/superadmin/dashboard', label: 'SaaS', icon: '📊' },
+      { to: '/superadmin/tenants', label: 'Tenant', icon: '🏢' },
+      { to: '/superadmin/settings', label: 'Sistem', icon: '⚙️' },
+    ]
+  }
+
   if (auth.isCashier) {
     const shiftPath = activeSession.value ? '/session/close' : '/session/open'
     const shiftLabel = activeSession.value ? 'Tutup Sesi' : 'Buka Sesi'
@@ -212,7 +247,7 @@ const mobileBottomItems = computed<BottomItem[]>(() => {
         <span class="font-bold text-base tracking-tight">Nessa POS</span>
       </div>
       <span v-if="auth.user" class="text-xs font-semibold text-emerald-400 max-w-[150px] truncate">
-        🏪 {{ auth.user.store?.name ?? 'Semua Toko (Konsolidasi)' }}
+        {{ auth.isSuperAdmin ? '🌐 SaaS Superadmin' : ('🏪 ' + (auth.user.store?.name ?? 'Semua Toko')) }}
       </span>
     </header>
 

@@ -65,6 +65,13 @@ class TenantController extends Controller
     public function createStore(Request $request)
     {
         $user = auth()->user();
+        $tenant = $user->tenant;
+        if ($tenant && $tenant->stores()->count() >= $tenant->max_stores) {
+            return response()->json([
+                'message' => 'Batas maksimal cabang toko terlampaui. Silakan perbarui langganan Anda.',
+            ], 403);
+        }
+
         $payload = $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'address' => ['nullable', 'string'],
@@ -75,8 +82,8 @@ class TenantController extends Controller
         $store = Store::create([
             'tenant_id' => $user->tenant_id,
             'name' => $payload['name'],
-            'address' => $payload['address'],
-            'phone' => $payload['phone'],
+            'address' => $payload['address'] ?? null,
+            'phone' => $payload['phone'] ?? null,
             'currency' => $payload['currency'],
             'is_license_activated' => false,
         ]);

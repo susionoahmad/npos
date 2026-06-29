@@ -17,9 +17,24 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        // 0. Seed System Settings
+        \App\Models\SystemSetting::insert([
+            ['key' => 'subscription_trial_days', 'value' => '14', 'created_at' => now(), 'updated_at' => now()],
+            ['key' => 'subscription_trial_stores_limit', 'value' => '1', 'created_at' => now(), 'updated_at' => now()],
+            ['key' => 'subscription_trial_users_limit', 'value' => '3', 'created_at' => now(), 'updated_at' => now()],
+            ['key' => 'subscription_base_fee', 'value' => '100000', 'created_at' => now(), 'updated_at' => now()],
+            ['key' => 'subscription_store_addon_fee', 'value' => '50000', 'created_at' => now(), 'updated_at' => now()],
+            ['key' => 'subscription_free_stores_limit', 'value' => '1', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
         // 1. Create Tenant
         $tenant = Tenant::create([
             'name' => 'Nessa Group (SaaS Tenant)',
+            'subscription_status' => 'active',
+            'trial_ends_at' => now()->addDays(14),
+            'subscription_ends_at' => now()->addDays(365),
+            'max_stores' => 5,
+            'max_users' => 20,
         ]);
 
         // 2. Create Stores under Tenant
