@@ -145,7 +145,7 @@ class SaaSSubscriptionLimitsTest extends TestCase
 
         // 1. Emulate Webhook for Base Slot (index 1)
         $orderId = 'SUB_' . $tenant->id . '_ADDON_1_' . time();
-        $serverKey = config('services.midtrans.server_key') ?: 'SB-Mid-server-lh-48s0YtD3tQ30w0b-W6vG8';
+        $serverKey = config('services.midtrans.server_key') ?: 'dummy_midtrans_server_key_for_testing_purposes_only';
         $statusCode = '200';
         $grossAmount = '100000'; // base fee
         $signatureKey = hash('sha512', $orderId . $statusCode . $grossAmount . $serverKey);
