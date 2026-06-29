@@ -188,6 +188,49 @@ function printReceipt(m: any) {
   win.document.close()
 }
 
+function printReport() {
+  window.print()
+}
+
+function exportToExcel() {
+  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`;
+  html += `<head><meta charset="utf-8"/><style>table { border-collapse: collapse; } th, td { border: 1px solid #ccc; padding: 6px; font-family: sans-serif; font-size: 12px; } th { background-color: #f1f5f9; font-weight: bold; }</style></head><body>`;
+  html += `<h2>LAPORAN KAS BESAR</h2>`;
+  html += `<p>Periode: ${filterFrom.value} s/d ${filterTo.value}</p>`;
+  html += `<p>Saldo Akhir: ${formatCurrency(balance.value)} | Total Masuk: ${formatCurrency(totalIn.value)} | Total Keluar: ${formatCurrency(totalOut.value)}</p>`;
+  html += `<table border="1">`;
+  html += `<thead><tr>`;
+  html += `<th>Tanggal</th><th>No. Bukti</th><th>Jenis</th><th>Sumber</th><th>Tujuan</th><th>Nominal</th><th>Arah</th><th>Keterangan</th><th>Dicatat</th>`;
+  html += `</tr></thead><tbody>`;
+  
+  mutations.value.forEach(m => {
+    const typeLabel = getTypeLabel(m.type);
+    const amountVal = (m.direction === 'in' ? '' : '-') + m.amount;
+    const formattedDate = new Date(m.created_at).toLocaleString('id-ID');
+    html += `<tr>`;
+    html += `<td>${formattedDate}</td>`;
+    html += `<td>${m.reference_number}</td>`;
+    html += `<td>${typeLabel}</td>`;
+    html += `<td>${m.source || '-'}</td>`;
+    html += `<td>${m.destination || '-'}</td>`;
+    html += `<td style="text-align: right;">${amountVal}</td>`;
+    html += `<td style="text-align: center;">${m.direction === 'in' ? 'Masuk' : 'Keluar'}</td>`;
+    html += `<td>${m.notes || ''}</td>`;
+    html += `<td>${m.user?.name || '-'}</td>`;
+    html += `</tr>`;
+  });
+  
+  html += `</tbody></table></body></html>`;
+
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `laporan_kas_besar_${filterFrom.value}_to_${filterTo.value}.xls`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 onMounted(() => loadMutations())
 </script>
 
@@ -200,12 +243,26 @@ onMounted(() => loadMutations())
         <h1 class="text-2xl font-bold text-slate-800">Kas Besar</h1>
         <p class="text-sm text-slate-500 mt-0.5">Manajemen kas utama toko &amp; arus dana</p>
       </div>
-      <button
-        @click="openForm"
-        class="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-emerald-700 transition-colors"
-      >
-        <span class="text-lg leading-none">＋</span> Catat Transaksi
-      </button>
+      <div class="flex flex-wrap gap-2 print:hidden">
+        <button
+          @click="exportToExcel"
+          class="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+        >
+          📊 Export Excel
+        </button>
+        <button
+          @click="printReport"
+          class="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+        >
+          🖨️ Cetak Laporan
+        </button>
+        <button
+          @click="openForm"
+          class="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-emerald-700 transition-colors"
+        >
+          <span class="text-lg leading-none">＋</span> Catat Transaksi
+        </button>
+      </div>
     </div>
 
     <!-- Balance Summary Cards -->
@@ -459,6 +516,150 @@ onMounted(() => loadMutations())
         </div>
       </div>
     </Teleport>
+
+    <!-- Print-only Report Layout -->
+    <Teleport to="body">
+      <div id="print-report-container-besar" class="hidden print:block font-sans text-xs text-black p-6">
+        <div class="text-center space-y-1 mb-4">
+          <h2 class="text-lg font-bold uppercase">LAPORAN MUTASI KAS BESAR</h2>
+          <p class="text-[10px]">Periode: {{ filterFrom }} s/d {{ filterTo }}</p>
+          <p class="text-[10px] italic">Dicetak pada {{ new Date().toLocaleString('id-ID') }} WIB</p>
+        </div>
+
+        <hr class="border-black my-3" />
+
+        <!-- Summary -->
+        <div class="print-grid-3 mb-4 font-mono text-[10px]">
+          <div>Total Masuk: <br/><strong>{{ formatCurrency(totalIn) }}</strong></div>
+          <div>Total Keluar: <br/><strong>{{ formatCurrency(totalOut) }}</strong></div>
+          <div>Saldo Akhir: <br/><strong>{{ formatCurrency(balance) }}</strong></div>
+        </div>
+
+        <!-- Table -->
+        <table class="w-full text-[10px] border-collapse">
+          <thead>
+            <tr class="border-b border-black text-left font-bold uppercase">
+              <th class="py-1">Tanggal</th>
+              <th class="py-1">No. Bukti</th>
+              <th class="py-1">Jenis</th>
+              <th class="py-1">Sumber/Tujuan</th>
+              <th class="py-1 text-right">Nominal</th>
+              <th class="py-1">Keterangan</th>
+              <th class="py-1">Dicatat</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-300">
+            <tr v-for="m in mutations" :key="'print-' + m.id">
+              <td class="py-1.5 whitespace-nowrap">{{ formatDate(m.created_at) }}</td>
+              <td class="py-1.5 font-mono whitespace-nowrap">{{ m.reference_number }}</td>
+              <td class="py-1.5 uppercase">{{ getTypeLabel(m.type) }}</td>
+              <td class="py-1.5">
+                <span v-if="m.source">{{ m.source }}</span>
+                <span v-if="m.source && m.destination"> → </span>
+                <span v-if="m.destination">{{ m.destination }}</span>
+              </td>
+              <td class="py-1.5 text-right font-mono font-bold">{{ m.direction === 'in' ? '+' : '-' }}{{ formatCurrency(m.amount) }}</td>
+              <td class="py-1.5">{{ m.notes }}</td>
+              <td class="py-1.5">{{ m.user?.name || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <hr class="border-black my-6" />
+        <div class="print-grid-2 text-center text-[10px] pt-4">
+          <div>
+            <p>Dibuat Oleh,</p>
+            <br/><br/><br/>
+            <p>( __________________ )</p>
+            <p class="font-bold">Kasir / Admin</p>
+          </div>
+          <div>
+            <p>Diverifikasi Oleh,</p>
+            <br/><br/><br/>
+            <p>( __________________ )</p>
+            <p class="font-bold">Supervisor / Owner</p>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
   </AppShell>
 </template>
+
+<style scoped>
+/* Scoped styles can go here if needed */
+</style>
+
+<style>
+#print-report-container-besar {
+  display: none;
+}
+
+@media print {
+  /* Hide the entire App shell layout */
+  #app {
+    display: none !important;
+  }
+  
+  /* Show only our print layout container */
+  body {
+    background-color: white !important;
+    color: black !important;
+    font-family: monospace !important;
+  }
+  
+  #print-report-container-besar {
+    display: block !important;
+    visibility: visible !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+  }
+  
+  #print-report-container-besar * {
+    visibility: visible !important;
+  }
+  
+  /* Simple grid simulation for print since Tailwind grid might get hidden */
+  .print-grid-3 {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    border: 1px solid black !important;
+    padding: 10px !important;
+  }
+  .print-grid-3 > div {
+    width: 33.33% !important;
+    min-width: 150px !important;
+    margin-bottom: 8px !important;
+  }
+  .print-grid-2 {
+    display: flex !important;
+    justify-content: space-between !important;
+    margin-top: 30px !important;
+  }
+  .print-grid-2 > div {
+    width: 45% !important;
+    text-align: center !important;
+  }
+  
+  /* Table formatting */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-top: 15px !important;
+  }
+  th, td {
+    border-bottom: 1px solid #000 !important;
+    padding: 6px 4px !important;
+    text-align: left !important;
+  }
+  th {
+    font-weight: bold !important;
+    text-transform: uppercase !important;
+  }
+  .text-right {
+    text-align: right !important;
+  }
+}
+</style>

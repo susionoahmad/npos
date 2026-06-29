@@ -239,6 +239,43 @@ function printReport() {
   window.print()
 }
 
+function exportToExcel() {
+  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`;
+  html += `<head><meta charset="utf-8"/><style>table { border-collapse: collapse; } th, td { border: 1px solid #ccc; padding: 6px; font-family: sans-serif; font-size: 12px; } th { background-color: #f1f5f9; font-weight: bold; }</style></head><body>`;
+  html += `<h2>LAPORAN MUTASI KAS LACI KASIR</h2>`;
+  html += `<p>Periode: ${fromDate.value} s/d ${toDate.value}</p>`;
+  html += `<p>Jumlah Data: ${mutations.value.length}</p>`;
+  html += `<table border="1">`;
+  html += `<thead><tr>`;
+  html += `<th>Tanggal & Jam</th><th>No Mutasi</th><th>No Ref</th><th>Tipe</th><th>Nominal</th><th>Keterangan</th><th>Kasir</th>`;
+  html += `</tr></thead><tbody>`;
+  
+  mutations.value.forEach(m => {
+    const typeLabel = getTypeLabel(m.type, m.direction);
+    const amountVal = (m.direction === 'in' ? '' : '-') + m.amount;
+    const formattedDate = new Date(m.created_at).toLocaleString('id-ID');
+    html += `<tr>`;
+    html += `<td>${formattedDate}</td>`;
+    html += `<td>${m.mutation_number}</td>`;
+    html += `<td>${m.reference_number || '-'}</td>`;
+    html += `<td>${typeLabel}</td>`;
+    html += `<td style="text-align: right;">${amountVal}</td>`;
+    html += `<td>${m.notes || ''}</td>`;
+    html += `<td>${m.user?.name || '-'}</td>`;
+    html += `</tr>`;
+  });
+  
+  html += `</tbody></table></body></html>`;
+
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `laporan_mutasi_kas_laci_${fromDate.value}_to_${toDate.value}.xls`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 onMounted(async () => {
   // For cashier: auto-select active session so their report is pre-filtered
   // For admin/owner: skip – they should see all cashiers' sessions
@@ -284,13 +321,22 @@ onMounted(async () => {
           <p class="text-xs text-slate-500 font-medium">Rekap log mutasi kas masuk, keluar, penyesuaian, dan operasional harian</p>
         </div>
         
-        <button
-          type="button"
-          class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5 shadow-sm transition-colors print:hidden"
-          @click="printReport"
-        >
-          🖨️ Cetak Laporan
-        </button>
+        <div class="flex gap-2 print:hidden">
+          <button
+            type="button"
+            class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5 shadow-sm transition-colors"
+            @click="exportToExcel"
+          >
+            📊 Export Excel
+          </button>
+          <button
+            type="button"
+            class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5 shadow-sm transition-colors"
+            @click="printReport"
+          >
+            🖨️ Cetak Laporan
+          </button>
+        </div>
       </div>
 
       <!-- Filters Panel (Hidden when printing) -->
@@ -507,98 +553,147 @@ onMounted(async () => {
     </div>
 
     <!-- Print-only Report Layout -->
-    <div class="hidden print:block font-sans text-xs text-black p-6">
-      <div class="text-center space-y-1 mb-4">
-        <h2 class="text-lg font-bold uppercase">LAPORAN MUTASI KAS LACI KASIR</h2>
-        <p class="text-[10px]">Periode: {{ fromDate }} s/d {{ toDate }}</p>
-        <p class="text-[10px] italic">Dicetak oleh: {{ auth.user?.name || '-' }} pada {{ new Date().toLocaleString('id-ID') }} WIB</p>
-      </div>
-
-      <hr class="border-black my-3" />
-
-      <!-- Summary -->
-      <div class="grid grid-cols-4 gap-2 border border-black p-3 mb-4 font-mono text-[9px]">
-        <div>Modal Awal: <br/><strong>Rp {{ money(totalModalAwal) }}</strong></div>
-        <div>Penjualan Tunai: <br/><strong>Rp {{ money(totalPenjualanTunai) }}</strong></div>
-        <div>Tambah Kas: <br/><strong>Rp {{ money(totalTambah) }}</strong></div>
-        <div>Kurang Kas: <br/><strong>Rp {{ money(totalKurang) }}</strong></div>
-        <div>Operasional: <br/><strong>Rp {{ money(totalPengeluaran) }}</strong></div>
-        <div>Setoran Kas: <br/><strong>Rp {{ money(totalSetorKas) }}</strong></div>
-        <div>Koreksi: <br/><strong>+{{ money(totalKoreksiIn) }}/-{{ money(totalKoreksiOut) }}</strong></div>
-        <div>Net Arus Kas: <br/><strong>Rp {{ money(netMutation) }}</strong></div>
-      </div>
-
-      <!-- Table -->
-      <table class="w-full text-[10px] border-collapse">
-        <thead>
-          <tr class="border-b border-black text-left font-bold uppercase">
-            <th class="py-1">Tanggal & Jam</th>
-            <th class="py-1">No Mutasi</th>
-            <th class="py-1">Tipe</th>
-            <th class="py-1 text-right">Nominal</th>
-            <th class="py-1">Keterangan</th>
-            <th class="py-1">Kasir</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-300">
-          <tr v-for="mut in mutations" :key="'print-' + mut.id">
-            <td class="py-1.5 whitespace-nowrap">{{ formatDateTime(mut.created_at) }}</td>
-            <td class="py-1.5 font-mono whitespace-nowrap">{{ mut.mutation_number }}</td>
-            <td class="py-1.5 uppercase">{{ getTypeLabel(mut.type, mut.direction) }}</td>
-            <td class="py-1.5 text-right font-mono font-bold">{{ mut.direction === 'in' ? '+' : '-' }} Rp {{ money(mut.amount) }}</td>
-            <td class="py-1.5">{{ mut.notes }}</td>
-            <td class="py-1.5 font-bold">{{ mut.user?.name || '-' }}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <hr class="border-black my-6" />
-      <div class="grid grid-cols-2 text-center text-[10px] pt-4">
-        <div>
-          <p>Dibuat Oleh,</p>
-          <br/><br/><br/>
-          <p>( __________________ )</p>
-          <p class="font-bold">{{ auth.user?.name || '-' }}</p>
+    <Teleport to="body">
+      <div id="print-report-container-laci" class="font-sans text-xs text-black p-6">
+        <div class="text-center space-y-1 mb-4">
+          <h2 class="text-lg font-bold uppercase">LAPORAN MUTASI KAS LACI KASIR</h2>
+          <p class="text-[10px]">Periode: {{ fromDate }} s/d {{ toDate }}</p>
+          <p class="text-[10px] italic">Dicetak oleh: {{ auth.user?.name || '-' }} pada {{ new Date().toLocaleString('id-ID') }} WIB</p>
         </div>
-        <div>
-          <p>Diverifikasi Oleh,</p>
-          <br/><br/><br/>
-          <p>( __________________ )</p>
-          <p class="font-bold">Supervisor / Owner</p>
+
+        <hr class="border-black my-3" />
+
+        <!-- Summary -->
+        <div class="print-grid-4 mb-4 font-mono text-[9px]">
+          <div>Modal Awal: <br/><strong>Rp {{ money(totalModalAwal) }}</strong></div>
+          <div>Penjualan Tunai: <br/><strong>Rp {{ money(totalPenjualanTunai) }}</strong></div>
+          <div>Tambah Kas: <br/><strong>Rp {{ money(totalTambah) }}</strong></div>
+          <div>Kurang Kas: <br/><strong>Rp {{ money(totalKurang) }}</strong></div>
+          <div>Operasional: <br/><strong>Rp {{ money(totalPengeluaran) }}</strong></div>
+          <div>Setoran Kas: <br/><strong>Rp {{ money(totalSetorKas) }}</strong></div>
+          <div>Koreksi: <br/><strong>+{{ money(totalKoreksiIn) }}/-{{ money(totalKoreksiOut) }}</strong></div>
+          <div>Net Arus Kas: <br/><strong>Rp {{ money(netMutation) }}</strong></div>
+        </div>
+
+        <!-- Table -->
+        <table class="w-full text-[10px] border-collapse">
+          <thead>
+            <tr class="border-b border-black text-left font-bold uppercase">
+              <th class="py-1">Tanggal & Jam</th>
+              <th class="py-1">No Mutasi</th>
+              <th class="py-1">Tipe</th>
+              <th class="py-1 text-right">Nominal</th>
+              <th class="py-1">Keterangan</th>
+              <th class="py-1">Kasir</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-300">
+            <tr v-for="mut in mutations" :key="'print-' + mut.id">
+              <td class="py-1.5 whitespace-nowrap">{{ formatDateTime(mut.created_at) }}</td>
+              <td class="py-1.5 font-mono whitespace-nowrap">{{ mut.mutation_number }}</td>
+              <td class="py-1.5 uppercase">{{ getTypeLabel(mut.type, mut.direction) }}</td>
+              <td class="py-1.5 text-right font-mono font-bold">{{ mut.direction === 'in' ? '+' : '-' }} Rp {{ money(mut.amount) }}</td>
+              <td class="py-1.5">{{ mut.notes }}</td>
+              <td class="py-1.5 font-bold">{{ mut.user?.name || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <hr class="border-black my-6" />
+        <div class="print-grid-2 text-center text-[10px] pt-4">
+          <div>
+            <p>Dibuat Oleh,</p>
+            <br/><br/><br/>
+            <p>( __________________ )</p>
+            <p class="font-bold">{{ auth.user?.name || '-' }}</p>
+          </div>
+          <div>
+            <p>Diverifikasi Oleh,</p>
+            <br/><br/><br/>
+            <p>( __________________ )</p>
+            <p class="font-bold">Supervisor / Owner</p>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </AppShell>
 </template>
 
 <style scoped>
+/* Scoped styles can go here if needed */
+</style>
+
+<style>
+/* Default screen display for print block: hidden */
+#print-report-container-laci {
+  display: none;
+}
+
 @media print {
-  /* Hide main Vue App Layout elements during raw page print */
-  :deep(.min-h-screen) {
-    grid-template-cols: 1fr !important;
-  }
-  :deep(aside),
-  :deep(header),
-  :deep(.print\:hidden),
-  .print\:hidden {
+  /* Hide the entire App shell layout */
+  #app {
     display: none !important;
   }
-  :deep(main) {
-    padding: 0 !important;
+  
+  /* Show only our print layout container */
+  body {
     background-color: white !important;
+    color: black !important;
+    font-family: monospace !important;
   }
-  body * {
-    visibility: hidden !important;
+  
+  #print-report-container-laci {
+    display: block !important;
+    visibility: visible !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
   }
-  .print\:block,
-  .print\:block * {
+  
+  #print-report-container-laci * {
     visibility: visible !important;
   }
-  .print\:block {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
+  
+  /* Simple grid simulation for print since Tailwind grid might get hidden */
+  .print-grid-4 {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    border: 1px solid black !important;
+    padding: 10px !important;
+  }
+  .print-grid-4 > div {
+    width: 25% !important;
+    min-width: 120px !important;
+    margin-bottom: 8px !important;
+  }
+  .print-grid-2 {
+    display: flex !important;
+    justify-content: space-between !important;
+    margin-top: 30px !important;
+  }
+  .print-grid-2 > div {
+    width: 45% !important;
+    text-align: center !important;
+  }
+  
+  /* Table formatting */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-top: 15px !important;
+  }
+  th, td {
+    border-bottom: 1px solid #000 !important;
+    padding: 6px 4px !important;
+    text-align: left !important;
+  }
+  th {
+    font-weight: bold !important;
+    text-transform: uppercase !important;
+  }
+  .text-right {
+    text-align: right !important;
   }
 }
 </style>
