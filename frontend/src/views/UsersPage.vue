@@ -136,15 +136,15 @@ onMounted(() => {
         <p class="text-sm text-slate-500">Kelola pengguna (hanya admin/owner).</p>
       </div>
 
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 w-full sm:w-auto">
         <input
           v-model="search"
-          class="w-[320px] rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+          class="min-w-0 flex-1 sm:w-[240px] md:w-[320px] rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
           placeholder="Cari nama / email / role..."
           :disabled="!canManageUsers"
         />
         <button
-          class="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
+          class="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
           type="button"
           :disabled="!canManageUsers"
           @click="openCreate"

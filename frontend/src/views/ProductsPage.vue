@@ -433,8 +433,8 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="modalOpen" class="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" @click.self="closeModal">
-      <div class="w-full max-w-2xl rounded-xl bg-white p-4 shadow">
+    <div v-if="modalOpen" class="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4 flex justify-center" @click.self="closeModal">
+      <div class="w-full max-w-2xl rounded-xl bg-white p-4 shadow my-auto">
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-lg font-semibold">{{ title }}</h3>
           <button class="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100" type="button" @click="closeModal">✕</button>
@@ -509,62 +509,62 @@ onMounted(async () => {
             />
             <div v-if="fieldErrors.expiry_date?.length" class="mt-1 text-xs text-red-700">{{ fieldErrors.expiry_date[0] }}</div>
           </div>
-            <div class="grid gap-3 md:grid-cols-2">
-              <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Kategori</label>
-                <select
-                  v-model="form.category_id"
-                  class="w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                  :class="fieldErrors.category_id ? 'border-red-300 bg-red-50' : ''"
-                >
-                  <option value="">(Tanpa kategori)</option>
-                  <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
-                </select>
-                <div v-if="fieldErrors.category_id?.length" class="mt-1 text-xs text-red-700">{{ fieldErrors.category_id[0] }}</div>
-              </div>
-              <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Supplier</label>
-                <select
-                  v-model="form.supplier_id"
-                  class="w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                  :class="fieldErrors.supplier_id ? 'border-red-300 bg-red-50' : ''"
-                >
-                  <option value="">(Tanpa supplier)</option>
-                  <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
-                </select>
-                <div v-if="fieldErrors.supplier_id?.length" class="mt-1 text-xs text-red-700">{{ fieldErrors.supplier_id[0] }}</div>
-              </div>
+          <div class="grid gap-3 md:grid-cols-2">
+            <div>
+              <label class="mb-1 block text-sm font-medium text-slate-700">Kategori</label>
+              <select
+                v-model="form.category_id"
+                class="w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                :class="fieldErrors.category_id ? 'border-red-300 bg-red-50' : ''"
+              >
+                <option value="">(Tanpa kategori)</option>
+                <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+              </select>
+              <div v-if="fieldErrors.category_id?.length" class="mt-1 text-xs text-red-700">{{ fieldErrors.category_id[0] }}</div>
             </div>
-            
-            <div class="md:col-span-2 border-t border-slate-100 pt-3">
-              <label class="mb-1 block text-sm font-medium text-slate-700">Gambar Produk</label>
-              <div class="flex items-center gap-4">
-                <div class="h-16 w-16 shrink-0 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center">
-                  <img
-                    v-if="tempImageUrl"
-                    :src="tempImageUrl"
-                    class="h-full w-full object-cover"
-                    alt="Preview"
-                  />
-                  <span v-else class="text-[10px] text-slate-400 font-semibold uppercase">No Pic</span>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    class="text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border file:border-slate-200 file:text-xs file:font-bold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 file:shadow-sm cursor-pointer"
-                    @change="onImageChange"
-                    :disabled="uploadLoading"
-                  />
-                  <div v-if="form.image" class="flex gap-2">
-                    <button type="button" @click="clearImage" class="text-xs text-red-600 hover:underline">Hapus Gambar</button>
-                  </div>
-                  <div v-if="uploadLoading" class="text-xs text-slate-400 font-medium">Mengupload...</div>
-                </div>
-              </div>
-              <div v-if="fieldErrors.image?.length" class="mt-1 text-xs text-red-700">{{ fieldErrors.image[0] }}</div>
+            <div>
+              <label class="mb-1 block text-sm font-medium text-slate-700">Supplier</label>
+              <select
+                v-model="form.supplier_id"
+                class="w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                :class="fieldErrors.supplier_id ? 'border-red-300 bg-red-50' : ''"
+              >
+                <option value="">(Tanpa supplier)</option>
+                <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
+              <div v-if="fieldErrors.supplier_id?.length" class="mt-1 text-xs text-red-700">{{ fieldErrors.supplier_id[0] }}</div>
             </div>
           </div>
+          
+          <div class="md:col-span-2 border-t border-slate-100 pt-3">
+            <label class="mb-1 block text-sm font-medium text-slate-700">Gambar Produk</label>
+            <div class="flex items-center gap-4">
+              <div class="h-16 w-16 shrink-0 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center">
+                <img
+                  v-if="tempImageUrl"
+                  :src="tempImageUrl"
+                  class="h-full w-full object-cover"
+                  alt="Preview"
+                />
+                <span v-else class="text-[10px] text-slate-400 font-semibold uppercase">No Pic</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <input
+                  type="file"
+                  accept="image/*"
+                  class="text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border file:border-slate-200 file:text-xs file:font-bold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 file:shadow-sm cursor-pointer"
+                  @change="onImageChange"
+                  :disabled="uploadLoading"
+                />
+                <div v-if="form.image" class="flex gap-2">
+                  <button type="button" @click="clearImage" class="text-xs text-red-600 hover:underline">Hapus Gambar</button>
+                </div>
+                <div v-if="uploadLoading" class="text-xs text-slate-400 font-medium">Mengupload...</div>
+              </div>
+            </div>
+            <div v-if="fieldErrors.image?.length" class="mt-1 text-xs text-red-700">{{ fieldErrors.image[0] }}</div>
+          </div>
+        </div>
 
         <div class="mt-4 flex justify-end gap-2">
           <button class="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50" type="button" @click="closeModal">Batal</button>
