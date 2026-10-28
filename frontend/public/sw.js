@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nessa-pos-cache-v1';
+const CACHE_NAME = 'nessa-pos-cache-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -34,45 +34,73 @@ self.addEventListener('activate', (event) => {
 
 // Fetch Event
 self.addEventListener('fetch', (event) => {
-  // Only handle HTTP/HTTPS requests (ignores chrome-extension, data, etc.)
+  // Only handle HTTP/HTTPS requests
   if (!event.request.url.startsWith('http')) {
     return;
   }
 
-  // Do not cache API requests or non-GET requests
+  // Do not intercept API requests or non-GET requests
   if (event.request.url.includes('/api/') || event.request.method !== 'GET') {
     return;
   }
 
+  // Handle SPA navigation requests (e.g. /products, /billing, /pos, etc.)
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .catch(() => {
+          return caches.match('/index.html')
+            .then((cachedIndex) => {
+              if (cachedIndex) return cachedIndex;
+              return caches.match('/');
+            })
+            .then((fallback) => {
+              if (fallback) return fallback;
+              return new Response(
+                '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Offline</title></head><body style="font-family:sans-serif;text-align:center;padding:50px;"><h2>Koneksi Terputus</h2><p>Halaman sedang offline dan belum tersedia di cache.</p></body></html>',
+                {
+                  status: 503,
+                  statusText: 'Service Unavailable',
+                  headers: { 'Content-Type': 'text/html; charset=utf-8' }
+                }
+              );
+            });
+        })
+    );
+    return;
+  }
+
+  // Handle static assets & media requests
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Fetch new version in background to update cache (stale-while-revalidate)
-        fetch(event.request).then((response) => {
-          if (response.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response));
+        // Stale-while-revalidate in background
+        fetch(event.request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
           }
-        }).catch(() => {/* Ignore network failures in bg */});
-        
+        }).catch(() => {/* Ignore network errors during background update */});
         return cachedResponse;
       }
 
-      return fetch(event.request).then((response) => {
-        if (!response || response.status !== 200 || response.type !== 'basic') {
-          return response;
-        }
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
+      return fetch(event.request)
+        .then((networkResponse) => {
+          if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+            return networkResponse;
+          }
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+          return networkResponse;
+        })
+        .catch(() => {
+          // Fallback response for failed static resource fetches
+          return new Response('', {
+            status: 408,
+            statusText: 'Request Timeout'
+          });
         });
-        return response;
-      }).catch((err) => {
-        // Fallback for document navigation when offline
-        if (event.request.mode === 'navigate') {
-          return caches.match('/index.html');
-        }
-        throw err;
-      });
     })
   );
 });
