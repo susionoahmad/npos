@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        $this->call(SubscriptionPlanSeeder::class);
         // 0. Seed System Settings
         \App\Models\SystemSetting::insert([
             ['key' => 'subscription_trial_days', 'value' => '14', 'created_at' => now(), 'updated_at' => now()],
