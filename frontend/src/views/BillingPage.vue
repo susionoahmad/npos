@@ -17,6 +17,29 @@ interface Plan {
   sort_order: number
 }
 
+interface TenantStore {
+  id: number
+  name: string
+  address: string | null
+  phone: string | null
+  is_license_activated: boolean
+  license_activated_at: string | null
+  users_count: number
+}
+
+interface TenantUser {
+  id: number
+  name: string
+  email: string
+  role: string
+  store_id: number | null
+  is_active: boolean
+  store?: {
+    id: number
+    name: string
+  }
+}
+
 const loading = ref(true)
 const checkoutLoading = ref(false)
 const error = ref('')
@@ -25,16 +48,29 @@ const success = ref('')
 const tenant = ref<any>(null)
 const currentPlan = ref<Plan | null>(null)
 const plans = ref<Plan[]>([])
+const stores = ref<TenantStore[]>([])
+const users = ref<TenantUser[]>([])
+
 const currentStores = ref(0)
 const activeStores = ref(0)
 const currentUsers = ref(0)
+const activeUsers = ref(0)
 const maxStoresData = ref(1)
 const maxUsersData = ref(3)
+const isOverQuotaStores = ref(false)
+const isOverQuotaUsers = ref(false)
 const daysRemaining = ref(0)
 const isActive = ref(true)
 
 // Billing Cycle Switcher: monthly vs yearly (hemat 2 bulan)
 const billingCycle = ref<'monthly' | 'yearly'>('yearly')
+
+// Modals for Owner Allocation
+const showStoreAllocationModal = ref(false)
+const showUserAllocationModal = ref(false)
+const savingAllocation = ref(false)
+const selectedStoreIds = ref<number[]>([])
+const selectedUserIds = ref<number[]>([])
 
 const effectiveMaxStores = computed(() => {
   return currentPlan.value?.max_stores || maxStoresData.value || tenant.value?.max_stores || 1
@@ -65,11 +101,19 @@ const fetchBilling = async () => {
     tenant.value = data.tenant
     currentPlan.value = data.current_plan
     plans.value = data.plans || []
+    stores.value = data.stores || []
+    users.value = data.users || []
+
     currentStores.value = data.current_stores || 0
     activeStores.value = data.active_stores || 0
     currentUsers.value = data.current_users || 0
+    activeUsers.value = data.active_users || 0
+
     maxStoresData.value = data.max_stores || data.current_plan?.max_stores || 1
     maxUsersData.value = data.max_users || data.current_plan?.max_users || 3
+    isOverQuotaStores.value = !!data.is_over_quota_stores
+    isOverQuotaUsers.value = !!data.is_over_quota_users
+
     daysRemaining.value = data.days_remaining || 0
     isActive.value = data.is_active
 
@@ -89,6 +133,105 @@ const fetchBilling = async () => {
 onMounted(() => {
   fetchBilling()
 })
+
+// Open Store Allocation Modal
+const openStoreAllocation = () => {
+  // Pre-fill with currently active store IDs, or pick up to maxStores
+  const currentActiveIds = stores.value
+    .filter((s) => s.is_license_activated)
+    .map((s) => s.id)
+
+  if (currentActiveIds.length > 0 && currentActiveIds.length <= effectiveMaxStores.value) {
+    selectedStoreIds.value = [...currentActiveIds]
+  } else {
+    // Take first N stores up to limit
+    selectedStoreIds.value = stores.value.slice(0, effectiveMaxStores.value).map((s) => s.id)
+  }
+  showStoreAllocationModal.value = true
+}
+
+const toggleStoreSelection = (storeId: number) => {
+  const index = selectedStoreIds.value.indexOf(storeId)
+  if (index > -1) {
+    selectedStoreIds.value.splice(index, 1)
+  } else {
+    if (selectedStoreIds.value.length < effectiveMaxStores.value) {
+      selectedStoreIds.value.push(storeId)
+    }
+  }
+}
+
+const submitStoreAllocation = async () => {
+  savingAllocation.value = true
+  error.value = ''
+  success.value = ''
+
+  try {
+    const { data } = await api.post('/billing/assign-active-stores', {
+      store_ids: selectedStoreIds.value,
+    })
+    success.value = data?.message || 'Alokasi cabang toko aktif berhasil disimpan.'
+    showStoreAllocationModal.value = false
+    await fetchBilling()
+  } catch (e: any) {
+    error.value = e?.response?.data?.message || 'Gagal menyimpan alokasi cabang toko.'
+  } finally {
+    savingAllocation.value = false
+  }
+}
+
+// Open User Allocation Modal
+const openUserAllocation = () => {
+  // Pre-fill with currently active user IDs
+  const activeIds = users.value.filter((u) => u.is_active).map((u) => u.id)
+  const ownerUser = users.value.find((u) => u.role === 'owner')
+
+  if (activeIds.length > 0 && activeIds.length <= effectiveMaxUsers.value) {
+    selectedUserIds.value = [...activeIds]
+  } else {
+    // Make sure owner is included, then take next users up to limit
+    const list: number[] = []
+    if (ownerUser) list.push(ownerUser.id)
+    for (const u of users.value) {
+      if (list.length >= effectiveMaxUsers.value) break
+      if (!list.includes(u.id)) list.push(u.id)
+    }
+    selectedUserIds.value = list
+  }
+  showUserAllocationModal.value = true
+}
+
+const toggleUserSelection = (userId: number, role: string) => {
+  if (role === 'owner') return // Owner cannot be deselected
+
+  const index = selectedUserIds.value.indexOf(userId)
+  if (index > -1) {
+    selectedUserIds.value.splice(index, 1)
+  } else {
+    if (selectedUserIds.value.length < effectiveMaxUsers.value) {
+      selectedUserIds.value.push(userId)
+    }
+  }
+}
+
+const submitUserAllocation = async () => {
+  savingAllocation.value = true
+  error.value = ''
+  success.value = ''
+
+  try {
+    const { data } = await api.post('/billing/assign-active-users', {
+      user_ids: selectedUserIds.value,
+    })
+    success.value = data?.message || 'Alokasi staf pengguna aktif berhasil disimpan.'
+    showUserAllocationModal.value = false
+    await fetchBilling()
+  } catch (e: any) {
+    error.value = e?.response?.data?.message || 'Gagal menyimpan alokasi staf pengguna.'
+  } finally {
+    savingAllocation.value = false
+  }
+}
 
 // Dynamic script loader for Midtrans Snap SDK
 const loadMidtransSnap = (): Promise<boolean> => {
@@ -232,11 +375,12 @@ const isCurrentPlan = (plan: Plan) => {
             </div>
           </div>
 
-          <!-- Usage progress -->
-          <div class="grid gap-4 sm:grid-cols-2 pt-1">
-            <div class="border border-slate-100 bg-slate-50/50 rounded-xl p-4 space-y-2">
+          <!-- Usage progress & Allocation triggers -->
+          <div class="grid gap-5 sm:grid-cols-2 pt-1">
+            <!-- Branch Store Usage -->
+            <div class="border border-slate-100 bg-slate-50/50 rounded-xl p-4 space-y-2.5">
               <div class="flex justify-between items-center text-xs font-bold text-slate-500">
-                <span>Cabang Toko Terpakai</span>
+                <span>Cabang Toko Terdaftar</span>
                 <span class="text-slate-900 font-black">{{ currentStores }} / {{ effectiveMaxStores }} Cabang</span>
               </div>
               <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
@@ -246,19 +390,37 @@ const isCurrentPlan = (plan: Plan) => {
                   :style="{ width: Math.min(100, (currentStores / effectiveMaxStores) * 100) + '%' }"
                 ></div>
               </div>
-              <div class="space-y-1">
+              <div class="space-y-2">
                 <p class="text-[11px]" :class="isActive ? 'text-slate-500 font-medium' : 'text-rose-600 font-semibold'">
                   {{ isActive ? `Lisensi cabang aktif: ${activeStores} toko` : 'Semua cabang dinonaktifkan sementara karena masa langganan kedaluwarsa' }}
                 </p>
-                <p v-if="currentStores > effectiveMaxStores" class="text-[10px] text-amber-700 bg-amber-50 rounded-md p-1.5 font-bold border border-amber-200/60">
-                  ⚠️ Jumlah cabang terdaftar ({{ currentStores }}) melebihi kuota paket saat ini (Maks. {{ effectiveMaxStores }} cabang). Disarankan upgrade ke Paket Pro untuk mengaktifkan seluruh cabang.
-                </p>
+
+                <!-- Downgrade / Over quota advice -->
+                <div v-if="currentStores > effectiveMaxStores" class="text-[11px] text-amber-800 bg-amber-50 rounded-lg p-2.5 border border-amber-200/70 space-y-1.5">
+                  <p class="font-bold">
+                    ⚠️ Paket ini hanya mengizinkan {{ effectiveMaxStores }} cabang aktif (Anda memiliki {{ currentStores }} cabang).
+                  </p>
+                  <p class="text-[10px] text-amber-700 leading-normal">
+                    Anda dapat menentukan cabang mana yang aktif beroperasi, atau upgrade ke Paket Pro untuk mengaktifkan seluruh cabang.
+                  </p>
+                </div>
+
+                <!-- Store Allocation Button for Owner -->
+                <button
+                  type="button"
+                  @click="openStoreAllocation"
+                  class="w-full rounded-lg bg-white border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors shadow-xs flex items-center justify-center gap-1.5"
+                >
+                  <span>⚙️</span>
+                  <span>Atur Alokasi Cabang Aktif (Maks. {{ effectiveMaxStores }})</span>
+                </button>
               </div>
             </div>
 
-            <div class="border border-slate-100 bg-slate-50/50 rounded-xl p-4 space-y-2">
+            <!-- User Staff Usage -->
+            <div class="border border-slate-100 bg-slate-50/50 rounded-xl p-4 space-y-2.5">
               <div class="flex justify-between items-center text-xs font-bold text-slate-500">
-                <span>Pengguna Sistem Terdaftar</span>
+                <span>Pengguna Staf Terdaftar</span>
                 <span class="text-slate-900 font-black">{{ currentUsers }} / {{ effectiveMaxUsers }} User</span>
               </div>
               <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
@@ -268,11 +430,30 @@ const isCurrentPlan = (plan: Plan) => {
                   :style="{ width: Math.min(100, (currentUsers / effectiveMaxUsers) * 100) + '%' }"
                 ></div>
               </div>
-              <div class="space-y-1">
-                <p class="text-[11px] text-slate-400">Total kasir, admin, dan supervisor di semua cabang</p>
-                <p v-if="currentUsers > effectiveMaxUsers" class="text-[10px] text-amber-700 bg-amber-50 rounded-md p-1.5 font-bold border border-amber-200/60">
-                  ⚠️ Jumlah pengguna terdaftar ({{ currentUsers }}) melebihi batas paket (Maks. {{ effectiveMaxUsers }} user).
+              <div class="space-y-2">
+                <p class="text-[11px] text-slate-500 font-medium">
+                  Pengguna aktif saat ini: <strong>{{ activeUsers }}</strong> user (kasir, admin, owner)
                 </p>
+
+                <!-- Downgrade / Over quota advice -->
+                <div v-if="currentUsers > effectiveMaxUsers" class="text-[11px] text-amber-800 bg-amber-50 rounded-lg p-2.5 border border-amber-200/70 space-y-1.5">
+                  <p class="font-bold">
+                    ⚠️ Paket ini membatasi {{ effectiveMaxUsers }} staf aktif (Anda memiliki {{ currentUsers }} user terdaftar).
+                  </p>
+                  <p class="text-[10px] text-amber-700 leading-normal">
+                    Tentukan staf/kasir yang aktif bertugas agar sesuai batas paket langganan Anda.
+                  </p>
+                </div>
+
+                <!-- User Allocation Button for Owner -->
+                <button
+                  type="button"
+                  @click="openUserAllocation"
+                  class="w-full rounded-lg bg-white border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors shadow-xs flex items-center justify-center gap-1.5"
+                >
+                  <span>👥</span>
+                  <span>Atur Alokasi Pengguna Aktif (Maks. {{ effectiveMaxUsers }})</span>
+                </button>
               </div>
             </div>
           </div>
@@ -416,14 +597,181 @@ const isCurrentPlan = (plan: Plan) => {
         <div class="bg-slate-50 border border-slate-200/80 rounded-2xl p-6 text-xs text-slate-600 space-y-2">
           <h4 class="font-bold text-slate-900 text-sm">Informasi & Bantuan Berlangganan</h4>
           <p>
-            • Pembayaran didukung penuh melalui Payment Gateway Midtrans (QRIS, GoPay, OVO, ShopeePay, dan Transfer Virtual Account BCA/Mandiri/BRI/BNI).
+            • Jika Anda beralih paket (downgrade), seluruh data historis transaksi dan inventori cabang tetap aman tersimpan tanpa terhapus.
           </p>
           <p>
-            • Paket tahunan memberikan efisiensi biaya maksimal dengan diskon setara 2 bulan gratis berlangganan.
+            • Owner memiliki wewenang penuh untuk memilih cabang mana dan staf mana yang aktif sesuai batas maksimal paket.
           </p>
           <p>
-            • Seluruh toko cabang yang terdaftar berada dalam satu paket lisensi, sehingga masa berlaku berlaku seragam dan otomatis diperpanjang secara instan.
+            • Pembayaran didukung penuh melalui Midtrans QRIS, GoPay, OVO, ShopeePay, dan Transfer Virtual Account BCA/Mandiri/BRI/BNI.
           </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: ATUR ALOKASI CABANG TOKO AKTIF -->
+    <div v-if="showStoreAllocationModal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+        <div class="flex justify-between items-start border-b pb-3">
+          <div>
+            <h3 class="text-lg font-black text-slate-900">Pilih Cabang Toko Aktif</h3>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Kuota Paket: Maksimal <strong class="text-slate-900">{{ effectiveMaxStores }} Cabang</strong>
+            </p>
+          </div>
+          <button type="button" @click="showStoreAllocationModal = false" class="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+        </div>
+
+        <!-- Progress Counter -->
+        <div class="flex items-center justify-between text-xs font-bold p-3 rounded-xl border" :class="selectedStoreIds.length === effectiveMaxStores ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-700'">
+          <span>Cabang Terpilih:</span>
+          <span>{{ selectedStoreIds.length }} / {{ effectiveMaxStores }} Cabang</span>
+        </div>
+
+        <!-- List of Stores -->
+        <div class="space-y-2">
+          <div
+            v-for="store in stores"
+            :key="store.id"
+            @click="toggleStoreSelection(store.id)"
+            class="p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3"
+            :class="selectedStoreIds.includes(store.id) ? 'border-slate-900 bg-slate-50/80 shadow-xs' : 'border-slate-200 bg-white hover:bg-slate-50/40'"
+          >
+            <div class="space-y-0.5">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-900 text-sm">{{ store.name }}</span>
+                <span
+                  v-if="selectedStoreIds.includes(store.id)"
+                  class="rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase px-2 py-0.5"
+                >
+                  Aktif
+                </span>
+                <span
+                  v-else
+                  class="rounded-full bg-slate-100 text-slate-500 text-[9px] font-black uppercase px-2 py-0.5"
+                >
+                  Nonaktif
+                </span>
+              </div>
+              <p class="text-xs text-slate-500">{{ store.address || 'Alamat belum diatur' }}</p>
+              <p class="text-[10px] text-slate-400">{{ store.users_count || 0 }} staf pengguna di cabang ini</p>
+            </div>
+
+            <!-- Checkbox UI -->
+            <input
+              type="checkbox"
+              :checked="selectedStoreIds.includes(store.id)"
+              :disabled="!selectedStoreIds.includes(store.id) && selectedStoreIds.length >= effectiveMaxStores"
+              class="h-5 w-5 rounded border-slate-300 text-slate-900 focus:ring-slate-900 cursor-pointer pointer-events-none"
+            />
+          </div>
+        </div>
+
+        <p class="text-[11px] text-slate-400 italic">
+          * Cabang yang dinonaktifkan tidak dapat memproses transaksi kasir, namun data riwayat dan stoknya tetap aman tersimpan.
+        </p>
+
+        <div class="flex justify-end gap-2 pt-3 border-t">
+          <button
+            type="button"
+            @click="showStoreAllocationModal = false"
+            class="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            @click="submitStoreAllocation"
+            :disabled="savingAllocation || selectedStoreIds.length === 0"
+            class="rounded-xl bg-slate-900 px-5 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            {{ savingAllocation ? 'Menyimpan...' : 'Simpan Alokasi Cabang' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: ATUR ALOKASI PENGGUNA STAF AKTIF -->
+    <div v-if="showUserAllocationModal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+        <div class="flex justify-between items-start border-b pb-3">
+          <div>
+            <h3 class="text-lg font-black text-slate-900">Pilih Staf Pengguna Aktif</h3>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Kuota Paket: Maksimal <strong class="text-slate-900">{{ effectiveMaxUsers }} Pengguna</strong>
+            </p>
+          </div>
+          <button type="button" @click="showUserAllocationModal = false" class="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+        </div>
+
+        <!-- Progress Counter -->
+        <div class="flex items-center justify-between text-xs font-bold p-3 rounded-xl border" :class="selectedUserIds.length === effectiveMaxUsers ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-700'">
+          <span>Pengguna Terpilih:</span>
+          <span>{{ selectedUserIds.length }} / {{ effectiveMaxUsers }} User</span>
+        </div>
+
+        <!-- List of Users -->
+        <div class="space-y-2">
+          <div
+            v-for="u in users"
+            :key="u.id"
+            @click="toggleUserSelection(u.id, u.role)"
+            class="p-3.5 rounded-xl border transition-all flex items-center justify-between gap-3"
+            :class="[
+              selectedUserIds.includes(u.id) ? 'border-slate-900 bg-slate-50/80 shadow-xs' : 'border-slate-200 bg-white hover:bg-slate-50/40',
+              u.role === 'owner' ? 'cursor-default' : 'cursor-pointer'
+            ]"
+          >
+            <div class="space-y-0.5">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-900 text-sm">{{ u.name }}</span>
+                <span
+                  class="rounded-full px-2 py-0.5 text-[9px] font-black uppercase"
+                  :class="u.role === 'owner' ? 'bg-purple-100 text-purple-800' : (u.role === 'admin' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-700')"
+                >
+                  {{ u.role }}
+                </span>
+                <span
+                  v-if="selectedUserIds.includes(u.id)"
+                  class="rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase px-2 py-0.5"
+                >
+                  Aktif
+                </span>
+              </div>
+              <p class="text-xs text-slate-500">{{ u.email }}</p>
+              <p class="text-[10px] text-slate-400">Cabang: {{ u.store?.name || 'Semua Cabang / Owner' }}</p>
+            </div>
+
+            <!-- Checkbox UI -->
+            <input
+              type="checkbox"
+              :checked="selectedUserIds.includes(u.id)"
+              :disabled="u.role === 'owner' || (!selectedUserIds.includes(u.id) && selectedUserIds.length >= effectiveMaxUsers)"
+              class="h-5 w-5 rounded border-slate-300 text-slate-900 focus:ring-slate-900 cursor-pointer pointer-events-none"
+            />
+          </div>
+        </div>
+
+        <p class="text-[11px] text-slate-400 italic">
+          * Akun Owner otomatis selalu aktif. Staf yang dinonaktifkan tidak dapat login ke aplikasi kasir hingga kuota ditambah atau diaktifkan kembali.
+        </p>
+
+        <div class="flex justify-end gap-2 pt-3 border-t">
+          <button
+            type="button"
+            @click="showUserAllocationModal = false"
+            class="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            @click="submitUserAllocation"
+            :disabled="savingAllocation || selectedUserIds.length === 0"
+            class="rounded-xl bg-slate-900 px-5 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            {{ savingAllocation ? 'Menyimpan...' : 'Simpan Alokasi Pengguna' }}
+          </button>
         </div>
       </div>
     </div>

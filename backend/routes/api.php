@@ -151,6 +151,8 @@ Route::middleware(['auth:sanctum', 'active.user', 'active.session'])->group(func
             Route::post('/tenant/stores', [\App\Http\Controllers\Api\TenantController::class, 'createStore']);
             Route::get('/billing/overview', [\App\Http\Controllers\Api\SubscriptionController::class, 'getBillingOverview']);
             Route::post('/billing/checkout', [\App\Http\Controllers\Api\SubscriptionController::class, 'checkout']);
+            Route::post('/billing/assign-active-stores', [\App\Http\Controllers\Api\SubscriptionController::class, 'assignActiveStores']);
+            Route::post('/billing/assign-active-users', [\App\Http\Controllers\Api\SubscriptionController::class, 'assignActiveUsers']);
         });
     });
 });

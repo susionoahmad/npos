@@ -58,8 +58,8 @@ class UserController extends Controller
                     'message' => 'Masa langganan dasar Anda telah berakhir. Silakan lakukan pembayaran perpanjangan terlebih dahulu.',
                 ], 403);
             }
-            $maxUsers = $tenant->subscription_status === 'trial' ? ($tenant->max_users ?? 3) : 100;
-            if ($tenant->users()->count() >= $maxUsers) {
+            $maxUsers = $tenant->max_users ?: 3;
+            if ($tenant->users()->where('is_active', true)->count() >= $maxUsers) {
                 return response()->json([
                     'message' => 'Batas maksimal pengguna terlampaui. Silakan perbarui langganan Anda.',
                 ], 403);

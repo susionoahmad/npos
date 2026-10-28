@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Tenant;
+use App\Models\Store;
+use App\Models\User;
 use App\Models\SubscriptionPlan;
 use App\Models\TenantSubscriptionSlot;
 use App\Models\SystemSetting;
@@ -50,9 +52,27 @@ class SubscriptionController extends Controller
             ]);
         }
 
-        $currentStores = $tenant->stores()->count();
-        $activeStores  = $tenant->stores()->where('is_license_activated', true)->count();
-        $currentUsers  = $tenant->users()->count();
+        // Tenant stores with users count
+        $stores = $tenant->stores()
+            ->withCount('users')
+            ->orderBy('id')
+            ->get(['id', 'name', 'address', 'phone', 'is_license_activated', 'license_activated_at']);
+
+        // Tenant users with assigned store info
+        $users = $tenant->users()
+            ->with('store:id,name')
+            ->orderByRaw("FIELD(role, 'owner', 'admin', 'cashier')")
+            ->orderBy('id')
+            ->get(['id', 'name', 'email', 'role', 'store_id', 'is_active']);
+
+        $currentStores = $stores->count();
+        $activeStores  = $stores->where('is_license_activated', true)->count();
+        $currentUsers  = $users->count();
+        $activeUsers   = $users->where('is_active', true)->count();
+
+        // Detect over-quota conditions (e.g. after a plan downgrade)
+        $isOverQuotaStores = $currentStores > $effectiveMaxStores;
+        $isOverQuotaUsers  = $currentUsers > $effectiveMaxUsers;
 
         // Calculate days remaining
         $daysRemaining = 0;
@@ -66,16 +86,130 @@ class SubscriptionController extends Controller
         $isActive = in_array($tenant->subscription_status, ['trial', 'active']) && $daysRemaining >= 0;
 
         return response()->json([
-            'tenant'          => $tenant,
-            'current_plan'    => $currentPlan,
-            'plans'           => $plans,
-            'current_stores'  => $currentStores,
-            'active_stores'   => $activeStores,
-            'max_stores'      => $effectiveMaxStores,
-            'current_users'   => $currentUsers,
-            'max_users'       => $effectiveMaxUsers,
-            'days_remaining'  => $daysRemaining,
-            'is_active'       => $isActive,
+            'tenant'               => $tenant,
+            'current_plan'         => $currentPlan,
+            'plans'                => $plans,
+            'stores'               => $stores,
+            'users'                => $users,
+            'current_stores'       => $currentStores,
+            'active_stores'        => $activeStores,
+            'max_stores'           => $effectiveMaxStores,
+            'current_users'        => $currentUsers,
+            'active_users'         => $activeUsers,
+            'max_users'            => $effectiveMaxUsers,
+            'is_over_quota_stores' => $isOverQuotaStores,
+            'is_over_quota_users'  => $isOverQuotaUsers,
+            'days_remaining'       => $daysRemaining,
+            'is_active'            => $isActive,
+        ]);
+    }
+
+    /**
+     * Owner allocates which stores are active up to the plan limit (for downgrade / store selection).
+     */
+    public function assignActiveStores(Request $request)
+    {
+        $user = auth()->user();
+        $tenant = $user->tenant;
+        abort_unless($user->role === 'owner', 403, 'Hanya Owner yang dapat mengatur alokasi lisensi cabang.');
+
+        $currentPlanSlug = $tenant->plan ?: 'starter';
+        $currentPlan = SubscriptionPlan::where('slug', $currentPlanSlug)->first();
+        $maxStores = $currentPlan ? $currentPlan->max_stores : ($tenant->max_stores ?: 1);
+
+        $validated = $request->validate([
+            'store_ids'   => ['present', 'array'],
+            'store_ids.*' => ['integer', 'exists:stores,id'],
+        ]);
+
+        $storeIds = array_unique($validated['store_ids']);
+
+        if (count($storeIds) > $maxStores) {
+            return response()->json([
+                'message' => "Jumlah cabang toko yang dipilih (" . count($storeIds) . ") melebihi kuota maksimal paket Anda ($maxStores cabang).",
+            ], 422);
+        }
+
+        // Verify that all selected store IDs belong to this tenant
+        $tenantStoreIds = $tenant->stores()->pluck('id')->toArray();
+        foreach ($storeIds as $id) {
+            if (!in_array($id, $tenantStoreIds)) {
+                return response()->json(['message' => 'Toko yang dipilih tidak valid.'], 403);
+            }
+        }
+
+        // If subscription is expired, do not allow activating licenses
+        if ($tenant->subscription_status === 'expired') {
+            return response()->json([
+                'message' => 'Masa langganan Anda telah kedaluwarsa. Harap perpanjang paket terlebih dahulu sebelum mengaktifkan lisensi cabang.',
+            ], 422);
+        }
+
+        // Apply license status
+        foreach ($tenantStoreIds as $storeId) {
+            $shouldActivate = in_array($storeId, $storeIds);
+            Store::where('id', $storeId)->update([
+                'is_license_activated' => $shouldActivate,
+                'license_activated_at' => $shouldActivate ? now() : null,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Alokasi lisensi cabang toko berhasil disimpan.',
+            'active_store_ids' => $storeIds,
+        ]);
+    }
+
+    /**
+     * Owner allocates which staff users are active up to the plan limit (for downgrade / user selection).
+     */
+    public function assignActiveUsers(Request $request)
+    {
+        $user = auth()->user();
+        $tenant = $user->tenant;
+        abort_unless($user->role === 'owner', 403, 'Hanya Owner yang dapat mengatur alokasi pengguna aktif.');
+
+        $currentPlanSlug = $tenant->plan ?: 'starter';
+        $currentPlan = SubscriptionPlan::where('slug', $currentPlanSlug)->first();
+        $maxUsers = $currentPlan ? $currentPlan->max_users : ($tenant->max_users ?: 3);
+
+        $validated = $request->validate([
+            'user_ids'   => ['present', 'array'],
+            'user_ids.*' => ['integer', 'exists:users,id'],
+        ]);
+
+        $userIds = array_unique($validated['user_ids']);
+
+        // Owner must always be active
+        if (!in_array($user->id, $userIds)) {
+            $userIds[] = $user->id;
+        }
+
+        if (count($userIds) > $maxUsers) {
+            return response()->json([
+                'message' => "Jumlah pengguna yang dipilih (" . count($userIds) . ") melebihi batas maksimal paket Anda ($maxUsers pengguna).",
+            ], 422);
+        }
+
+        // Verify that all selected user IDs belong to this tenant
+        $tenantUserIds = $tenant->users()->pluck('id')->toArray();
+        foreach ($userIds as $id) {
+            if (!in_array($id, $tenantUserIds)) {
+                return response()->json(['message' => 'Pengguna yang dipilih tidak valid.'], 403);
+            }
+        }
+
+        // Apply active status
+        foreach ($tenantUserIds as $uId) {
+            $shouldBeActive = in_array($uId, $userIds);
+            User::where('id', $uId)->update([
+                'is_active' => $shouldBeActive,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Alokasi pengguna aktif berhasil disimpan.',
+            'active_user_ids' => $userIds,
         ]);
     }
 
@@ -227,14 +361,32 @@ class SubscriptionController extends Controller
                     'max_users'            => $maxUsers,
                 ]);
 
-                // Automatically activate licenses for tenant stores up to max_stores
+                // Intelligent Store Activation:
+                // Keep previously activated stores up to max_stores, or activate first stores
                 $stores = $tenant->stores()->orderBy('id')->get();
-                foreach ($stores as $idx => $store) {
-                    $shouldActivate = ($idx < $maxStores);
-                    $store->update([
-                        'is_license_activated' => $shouldActivate,
-                        'license_activated_at' => $shouldActivate ? ($store->license_activated_at ?: now()) : null,
-                    ]);
+                $currentlyActiveStores = $stores->where('is_license_activated', true);
+
+                if ($currentlyActiveStores->count() > 0 && $currentlyActiveStores->count() <= $maxStores) {
+                    // Already within limit, leave active
+                } else {
+                    foreach ($stores as $idx => $store) {
+                        $shouldActivate = ($idx < $maxStores);
+                        $store->update([
+                            'is_license_activated' => $shouldActivate,
+                            'license_activated_at' => $shouldActivate ? ($store->license_activated_at ?: now()) : null,
+                        ]);
+                    }
+                }
+
+                // Intelligent User Activation:
+                $users = $tenant->users()->orderByRaw("FIELD(role, 'owner', 'admin', 'cashier')")->orderBy('id')->get();
+                $activeUsersCount = $users->where('is_active', true)->count();
+                if ($activeUsersCount > $maxUsers) {
+                    // If over user quota upon downgrade, keep top max_users active
+                    foreach ($users as $idx => $u) {
+                        $shouldActive = ($idx < $maxUsers) || ($u->role === 'owner');
+                        $u->update(['is_active' => $shouldActive]);
+                    }
                 }
 
                 Log::info('Tenant subscription plan upgraded/renewed:', [
