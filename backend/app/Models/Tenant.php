@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Tenant extends Model
 {
@@ -12,6 +13,8 @@ class Tenant extends Model
 
     protected $fillable = [
         'name',
+        'plan',
+        'billing_cycle',
         'subscription_status',
         'trial_ends_at',
         'subscription_ends_at',
@@ -41,23 +44,21 @@ class Tenant extends Model
         return $this->hasMany(TenantSubscriptionSlot::class);
     }
 
-    /**
-     * Count active store slots (base + addon).
-     * Returns the effective max_stores limit from active slots.
-     */
-    public function activeSlotStoreLimit(): int
+    public function subscriptionPlan(): BelongsTo
     {
-        // If in trial mode, use the stored max_stores limit
-        if ($this->subscription_status === 'trial') {
-            return (int) ($this->max_stores ?? 1);
-        }
-
-        $activeSlots = $this->subscriptionSlots()->active()->count();
-        return max(1, $activeSlots); // at least 1
+        return $this->belongsTo(SubscriptionPlan::class, 'plan', 'slug');
     }
 
     /**
-     * Check if the base (slot 1) is active - required for all operations.
+     * Effective max_stores limit from plan / stored limit.
+     */
+    public function activeSlotStoreLimit(): int
+    {
+        return (int) ($this->max_stores ?? 1);
+    }
+
+    /**
+     * Check if subscription is active for operations.
      */
     public function isBaseSlotActive(): bool
     {
@@ -73,13 +74,6 @@ class Tenant extends Model
 
         if ($this->subscription_ends_at && $now->gt($this->subscription_ends_at)) {
             return false;
-        }
-
-        if ($this->subscriptionSlots()->exists()) {
-            return $this->subscriptionSlots()
-                ->where('slot_type', 'base')
-                ->active()
-                ->exists();
         }
 
         return $this->subscription_status === 'active';

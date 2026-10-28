@@ -129,7 +129,7 @@ Route::middleware(['auth:sanctum', 'active.user', 'active.session'])->group(func
             Route::post('/store/activate-license', [StoreController::class, 'activateLicense']);
         });
 
-        // Superadmin-only routes
+                // Superadmin-only routes
         Route::middleware('role:superadmin')->group(function () {
             Route::get('/superadmin/tenants', [\App\Http\Controllers\Api\SuperadminController::class, 'getTenants']);
             Route::post('/superadmin/tenants', [\App\Http\Controllers\Api\SuperadminController::class, 'createTenant']);
@@ -137,6 +137,12 @@ Route::middleware(['auth:sanctum', 'active.user', 'active.session'])->group(func
             Route::get('/superadmin/settings', [\App\Http\Controllers\Api\SuperadminController::class, 'getSettings']);
             Route::post('/superadmin/settings', [\App\Http\Controllers\Api\SuperadminController::class, 'updateSettings']);
             Route::post('/superadmin/tenants/{tenant}/subscription', [\App\Http\Controllers\Api\SuperadminController::class, 'updateTenantSubscription']);
+
+            // Subscription Plans management
+            Route::get('/superadmin/plans', [\App\Http\Controllers\Api\SuperadminController::class, 'getPlans']);
+            Route::post('/superadmin/plans', [\App\Http\Controllers\Api\SuperadminController::class, 'storePlan']);
+            Route::put('/superadmin/plans/{plan}', [\App\Http\Controllers\Api\SuperadminController::class, 'updatePlan']);
+            Route::delete('/superadmin/plans/{plan}', [\App\Http\Controllers\Api\SuperadminController::class, 'deletePlan']);
         });
 
         // Owner-only routes (Billing & renewal)

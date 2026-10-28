@@ -7,14 +7,17 @@ use App\Models\Tenant;
 use App\Models\Store;
 use App\Models\User;
 use App\Models\TenantSubscriptionSlot;
+use App\Models\SubscriptionPlan;
+use App\Models\SystemSetting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use App\Models\SystemSetting;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class SuperadminController extends Controller
 {
     /**
-     * Helper to sync all expired tenants and their stores/slots
+     * Helper to sync all expired tenants and their stores
      */
     public static function syncExpiredTenants(): void
     {
@@ -46,7 +49,7 @@ class SuperadminController extends Controller
             $tenant->stores()->update(['is_license_activated' => false]);
         }
 
-        // 3. Slot langganan aktif yang telah kedaluwarsa
+        // 3. Slot langganan lama yang telah kedaluwarsa
         TenantSubscriptionSlot::where('status', 'active')
             ->where('expires_at', '<', $now)
             ->update(['status' => 'expired']);
@@ -63,7 +66,8 @@ class SuperadminController extends Controller
             'stores' => function ($query) {
                 $query->withCount('users')->with(['users:id,store_id,tenant_id,name,email,role,is_active']);
             },
-            'users:id,tenant_id,store_id,name,email,role,is_active'
+            'users:id,tenant_id,store_id,name,email,role,is_active',
+            'subscriptionPlan'
         ])
         ->withCount(['stores', 'users'])
         ->get();
@@ -80,20 +84,27 @@ class SuperadminController extends Controller
             'owner_email' => ['required', 'email', 'unique:users,email'],
             'owner_password' => ['required', 'string', 'min:6'],
             'store_name' => ['required', 'string', 'max:120'],
+            'plan' => ['nullable', 'string', 'max:50'],
+            'billing_cycle' => ['nullable', 'in:monthly,yearly'],
         ]);
 
         $result = DB::transaction(function () use ($payload) {
-            // 1. Create Tenant
             $trialDays = (int) SystemSetting::getVal('subscription_trial_days', 14);
-            $trialStores = (int) SystemSetting::getVal('subscription_trial_stores_limit', 1);
-            $trialUsers = (int) SystemSetting::getVal('subscription_trial_users_limit', 3);
+            $planSlug = $payload['plan'] ?? 'starter';
+            $plan = SubscriptionPlan::where('slug', $planSlug)->first();
 
+            $maxStores = $plan ? $plan->max_stores : (int) SystemSetting::getVal('subscription_trial_stores_limit', 1);
+            $maxUsers = $plan ? $plan->max_users : (int) SystemSetting::getVal('subscription_trial_users_limit', 3);
+
+            // 1. Create Tenant
             $tenant = Tenant::create([
                 'name' => $payload['company_name'],
+                'plan' => $planSlug,
+                'billing_cycle' => $payload['billing_cycle'] ?? 'monthly',
                 'subscription_status' => 'trial',
                 'trial_ends_at' => now()->addDays($trialDays),
-                'max_stores' => $trialStores,
-                'max_users' => $trialUsers,
+                'max_stores' => $maxStores,
+                'max_users' => $maxUsers,
             ]);
 
             // 2. Create Store
@@ -101,7 +112,8 @@ class SuperadminController extends Controller
                 'tenant_id' => $tenant->id,
                 'name' => $payload['store_name'],
                 'currency' => 'IDR',
-                'is_license_activated' => false,
+                'is_license_activated' => true,
+                'license_activated_at' => now(),
             ]);
 
             // 3. Create Owner User
@@ -147,7 +159,7 @@ class SuperadminController extends Controller
     }
 
     /**
-     * Get SaaS subscription settings
+     * Get SaaS subscription settings (legacy)
      */
     public function getSettings()
     {
@@ -162,7 +174,7 @@ class SuperadminController extends Controller
     }
 
     /**
-     * Update SaaS subscription settings
+     * Update SaaS subscription settings (legacy)
      */
     public function updateSettings(Request $request)
     {
@@ -186,6 +198,148 @@ class SuperadminController extends Controller
     }
 
     /**
+     * Get all subscription plans with tenant subscriber counts
+     */
+    public function getPlans()
+    {
+        $plans = SubscriptionPlan::orderBy('sort_order', 'asc')
+            ->orderBy('id', 'asc')
+            ->get()
+            ->map(function ($plan) {
+                $subscribersCount = Tenant::where('plan', $plan->slug)->count();
+                $activeSubscribersCount = Tenant::where('plan', $plan->slug)
+                    ->whereIn('subscription_status', ['trial', 'active'])
+                    ->count();
+
+                return array_merge($plan->toArray(), [
+                    'subscribers_count' => $subscribersCount,
+                    'active_subscribers_count' => $activeSubscribersCount,
+                ]);
+            });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $plans,
+        ]);
+    }
+
+    /**
+     * Store a new subscription plan
+     */
+    public function storePlan(Request $request)
+    {
+        $validated = $request->validate([
+            'slug' => ['required', 'string', 'max:50', 'alpha_dash', 'unique:subscription_plans,slug'],
+            'name' => ['required', 'string', 'max:100'],
+            'tagline' => ['nullable', 'string', 'max:255'],
+            'price_monthly' => ['required', 'numeric', 'min:0'],
+            'price_yearly' => ['required', 'numeric', 'min:0'],
+            'max_stores' => ['required', 'integer', 'min:1'],
+            'max_users' => ['required', 'integer', 'min:1'],
+            'features' => ['nullable', 'array'],
+            'features.*' => ['string'],
+            'is_active' => ['nullable', 'boolean'],
+            'sort_order' => ['nullable', 'integer'],
+        ]);
+
+        $plan = SubscriptionPlan::create([
+            'slug' => Str::slug($validated['slug']),
+            'name' => $validated['name'],
+            'tagline' => $validated['tagline'] ?? null,
+            'price_monthly' => $validated['price_monthly'],
+            'price_yearly' => $validated['price_yearly'],
+            'max_stores' => $validated['max_stores'],
+            'max_users' => $validated['max_users'],
+            'features' => $validated['features'] ?? [],
+            'is_active' => $validated['is_active'] ?? true,
+            'sort_order' => $validated['sort_order'] ?? 0,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Paket langganan baru berhasil dibuat.',
+            'data' => $plan,
+        ], 201);
+    }
+
+    /**
+     * Update an existing subscription plan
+     */
+    public function updatePlan(Request $request, $id)
+    {
+        $plan = SubscriptionPlan::findOrFail($id);
+
+        $validated = $request->validate([
+            'slug' => [
+                'required',
+                'string',
+                'max:50',
+                'alpha_dash',
+                Rule::unique('subscription_plans', 'slug')->ignore($plan->id),
+            ],
+            'name' => ['required', 'string', 'max:100'],
+            'tagline' => ['nullable', 'string', 'max:255'],
+            'price_monthly' => ['required', 'numeric', 'min:0'],
+            'price_yearly' => ['required', 'numeric', 'min:0'],
+            'max_stores' => ['required', 'integer', 'min:1'],
+            'max_users' => ['required', 'integer', 'min:1'],
+            'features' => ['nullable', 'array'],
+            'features.*' => ['string'],
+            'is_active' => ['nullable', 'boolean'],
+            'sort_order' => ['nullable', 'integer'],
+        ]);
+
+        $plan->update([
+            'slug' => Str::slug($validated['slug']),
+            'name' => $validated['name'],
+            'tagline' => $validated['tagline'] ?? null,
+            'price_monthly' => $validated['price_monthly'],
+            'price_yearly' => $validated['price_yearly'],
+            'max_stores' => $validated['max_stores'],
+            'max_users' => $validated['max_users'],
+            'features' => $validated['features'] ?? [],
+            'is_active' => $validated['is_active'] ?? $plan->is_active,
+            'sort_order' => $validated['sort_order'] ?? $plan->sort_order,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Paket langganan berhasil diperbarui.',
+            'data' => $plan,
+        ]);
+    }
+
+    /**
+     * Delete or deactivate a subscription plan
+     */
+    public function deletePlan($id)
+    {
+        $plan = SubscriptionPlan::findOrFail($id);
+
+        $activeSubscribersCount = Tenant::where('plan', $plan->slug)
+            ->whereIn('subscription_status', ['trial', 'active'])
+            ->count();
+
+        if ($activeSubscribersCount > 0) {
+            $plan->update(['is_active' => false]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Paket '{$plan->name}' dinonaktifkan karena masih digunakan oleh {$activeSubscribersCount} tenant.",
+                'data' => $plan,
+            ]);
+        }
+
+        $planName = $plan->name;
+        $plan->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Paket '{$planName}' berhasil dihapus.",
+        ]);
+    }
+
+    /**
      * Update tenant subscription details manually (Superadmin)
      */
     public function updateTenantSubscription(Request $request, $tenantId)
@@ -194,35 +348,49 @@ class SuperadminController extends Controller
 
         $payload = $request->validate([
             'subscription_status' => ['required', 'in:trial,active,expired,cancelled'],
+            'plan' => ['nullable', 'string', 'max:50'],
+            'billing_cycle' => ['nullable', 'in:monthly,yearly'],
             'trial_ends_at' => ['nullable', 'date'],
             'subscription_ends_at' => ['nullable', 'date'],
-            'max_stores' => ['required', 'integer', 'min:1'],
-            'max_users' => ['required', 'integer', 'min:1'],
+            'max_stores' => ['nullable', 'integer', 'min:1'],
+            'max_users' => ['nullable', 'integer', 'min:1'],
         ]);
 
-        $tenant->update($payload);
+        // Jika plan diganti dan limit tidak diisi manual, sesuaikan dengan plan
+        if (!empty($payload['plan'])) {
+            $planModel = SubscriptionPlan::where('slug', $payload['plan'])->first();
+            if ($planModel) {
+                if (empty($payload['max_stores'])) {
+                    $payload['max_stores'] = $planModel->max_stores;
+                }
+                if (empty($payload['max_users'])) {
+                    $payload['max_users'] = $planModel->max_users;
+                }
+            }
+        }
+
+        $tenant->update(array_filter($payload, fn($val) => !is_null($val)));
 
         // Jika status diubah menjadi expired atau cancelled, nonaktifkan lisensi toko
         if (in_array($payload['subscription_status'], ['expired', 'cancelled'])) {
             $tenant->stores()->update(['is_license_activated' => false]);
             $tenant->subscriptionSlots()->update(['status' => 'expired']);
-        } elseif ($payload['subscription_status'] === 'active') {
-            // Jika status diaktifkan kembali dan belum ada lisensi aktif, aktifkan toko utama
-            $hasActiveStore = $tenant->stores()->where('is_license_activated', true)->exists();
-            if (!$hasActiveStore) {
-                $mainStore = $tenant->stores()->first();
-                if ($mainStore) {
-                    $mainStore->update([
-                        'is_license_activated' => true,
-                        'license_activated_at' => now(),
-                    ]);
-                }
+        } elseif ($payload['subscription_status'] === 'active' || $payload['subscription_status'] === 'trial') {
+            // Aktifkan lisensi seluruh toko hingga batas max_stores
+            $stores = $tenant->stores()->orderBy('id')->get();
+            $limit = $tenant->max_stores ?: 1;
+            foreach ($stores as $index => $store) {
+                $shouldActive = ($index < $limit);
+                $store->update([
+                    'is_license_activated' => $shouldActive,
+                    'license_activated_at' => $shouldActive ? ($store->license_activated_at ?: now()) : null,
+                ]);
             }
         }
 
         return response()->json([
             'message' => 'Detail berlangganan tenant berhasil diperbarui.',
-            'tenant' => $tenant->fresh(['stores', 'users'])
+            'tenant' => $tenant->fresh(['stores', 'users', 'subscriptionPlan'])
         ]);
     }
 }

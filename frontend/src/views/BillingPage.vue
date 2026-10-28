@@ -3,23 +3,44 @@ import { onMounted, ref } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import api from '../services/api'
 
+interface Plan {
+  id: number
+  slug: string
+  name: string
+  tagline: string | null
+  price_monthly: number
+  price_yearly: number
+  max_stores: number
+  max_users: number
+  features: string[]
+  is_active: boolean
+  sort_order: number
+}
+
 const loading = ref(true)
 const checkoutLoading = ref(false)
 const error = ref('')
 const success = ref('')
 
 const tenant = ref<any>(null)
-const slots = ref<any[]>([])
+const currentPlan = ref<Plan | null>(null)
+const plans = ref<Plan[]>([])
 const currentStores = ref(0)
+const activeStores = ref(0)
 const currentUsers = ref(0)
-const pricing = ref({
-  base_fee: 100000,
-  store_addon_fee: 50000,
-  free_stores_limit: 1,
-})
+const daysRemaining = ref(0)
+const isActive = ref(true)
 
-const money = (n: number) =>
-  new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
+// Billing Cycle Switcher: monthly vs yearly (hemat 2 bulan)
+const billingCycle = ref<'monthly' | 'yearly'>('yearly')
+
+const money = (val: number) => {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0,
+  }).format(val || 0)
+}
 
 const formatDate = (d: string | null) => {
   if (!d) return '-'
@@ -32,14 +53,22 @@ const fetchBilling = async () => {
   try {
     const { data } = await api.get('/billing/overview')
     tenant.value = data.tenant
-    slots.value = data.slots ?? []
-    currentStores.value = data.current_stores ?? 0
-    currentUsers.value = data.current_users ?? 0
-    if (data.pricing_config) {
-      pricing.value = data.pricing_config
+    currentPlan.value = data.current_plan
+    plans.value = data.plans || []
+    currentStores.value = data.current_stores || 0
+    activeStores.value = data.active_stores || 0
+    currentUsers.value = data.current_users || 0
+    daysRemaining.value = data.days_remaining || 0
+    isActive.value = data.is_active
+
+    // Set default cycle to tenant's current billing cycle if available
+    if (data.tenant?.billing_cycle === 'monthly') {
+      billingCycle.value = 'monthly'
+    } else {
+      billingCycle.value = 'yearly'
     }
   } catch (e: any) {
-    error.value = e?.response?.data?.message || 'Gagal memuat data tagihan.'
+    error.value = e?.response?.data?.message || 'Gagal memuat informasi tagihan & langganan.'
   } finally {
     loading.value = false
   }
@@ -58,20 +87,20 @@ const loadMidtransSnap = (): Promise<boolean> => {
     }
     const isProduction = import.meta.env.VITE_MIDTRANS_IS_PRODUCTION === 'true'
     const clientKey = import.meta.env.VITE_MIDTRANS_CLIENT_KEY || 'SB-Mid-client-y_aIuP3k0F3rW-Uq'
-    
+
     const script = document.createElement('script')
     script.src = isProduction
       ? 'https://app.midtrans.com/snap/snap.js'
       : 'https://app.sandbox.midtrans.com/snap/snap.js'
-    
+
     script.setAttribute('data-client-key', clientKey)
     script.onload = () => resolve(true)
     script.onerror = () => resolve(false)
     document.head.appendChild(script)
   })
-};
+}
 
-const handleCheckout = async (action: 'renew' | 'add_addon', slotId?: number) => {
+const handleCheckout = async (plan: Plan) => {
   checkoutLoading.value = true
   error.value = ''
   success.value = ''
@@ -80,196 +109,295 @@ const handleCheckout = async (action: 'renew' | 'add_addon', slotId?: number) =>
     // 1. Load Snap SDK
     const sdkLoaded = await loadMidtransSnap()
     if (!sdkLoaded) {
-      throw new Error('Gagal memuat sistem pembayaran Midtrans. Coba matikan AdBlocker Anda.')
+      throw new Error('Gagal memuat modul pembayaran Midtrans. Pastikan koneksi internet stabil atau nonaktifkan ad-blocker.')
     }
 
     // 2. Request snap token from backend
     const { data } = await api.post('/billing/checkout', {
-      action,
-      slot_id: slotId,
+      plan: plan.slug,
+      billing_cycle: billingCycle.value,
     })
 
     if (!data.token) {
-      throw new Error('Gagal mendapatkan kode pembayaran.')
+      throw new Error('Gagal mendapatkan sesi pembayaran Midtrans.')
     }
 
     // 3. Open Midtrans Snap Payment modal popup
     (window as any).snap.pay(data.token, {
       onSuccess: function () {
-        success.value = 'Pembayaran berhasil! Masa berlangganan Anda telah diperpanjang.'
+        success.value = `Pembayaran berhasil! Masa berlangganan paket '${plan.name}' telah aktif.`
         fetchBilling()
       },
       onPending: function () {
-        success.value = 'Pembayaran tertunda. Silakan selesaikan pembayaran di aplikasi e-wallet / bank Anda.'
+        success.value = 'Instruksi pembayaran telah dibuat. Silakan selesaikan pembayaran di aplikasi e-wallet / mobile banking Anda.'
       },
       onError: function () {
-        error.value = 'Terjadi kesalahan pembayaran. Silakan coba lagi.'
+        error.value = 'Terjadi kesalahan saat memproses pembayaran Midtrans. Silakan coba kembali.'
       },
       onClose: function () {
-        checkoutLoading.value = false
-      }
+        // User closed snap modal
+      },
     })
   } catch (e: any) {
-    error.value = e.message || 'Terjadi kesalahan saat memproses checkout.'
+    error.value = e?.response?.data?.message || e?.message || 'Gagal memulai checkout langganan.'
+  } finally {
     checkoutLoading.value = false
   }
+}
+
+const isCurrentPlan = (plan: Plan) => {
+  return tenant.value?.plan === plan.slug
 }
 </script>
 
 <template>
   <AppShell>
-    <div class="space-y-6 max-w-4xl">
+    <div class="space-y-8 max-w-5xl pb-16">
       <!-- Title -->
       <div>
-        <h2 class="text-2xl font-black tracking-tight text-slate-900">Tagihan & Langganan</h2>
-        <p class="text-sm text-slate-500">Kelola lisensi cabang toko Anda dan perbarui masa aktif berlangganan.</p>
+        <h2 class="text-2xl font-black tracking-tight text-slate-900">Paket & Tagihan Langganan</h2>
+        <p class="text-sm text-slate-500">Pilih paket terbaik untuk bisnis ritel Anda. Satu paket mencakup seluruh cabang toko tanpa repot mengingat masa aktif terpisah.</p>
       </div>
 
       <!-- Messages -->
-      <div v-if="error" class="bg-red-50 text-red-800 p-3 rounded-lg text-sm font-medium">
+      <div v-if="error" class="bg-red-50 text-red-800 p-4 rounded-xl text-sm font-medium border border-red-200">
         {{ error }}
       </div>
-      <div v-if="success" class="bg-emerald-50 text-emerald-800 p-3 rounded-lg text-sm font-medium">
+      <div v-if="success" class="bg-emerald-50 text-emerald-800 p-4 rounded-xl text-sm font-medium border border-emerald-200">
         {{ success }}
       </div>
 
       <!-- Loading State -->
-      <div v-if="loading" class="bg-white rounded-2xl border border-slate-100 p-10 flex justify-center items-center shadow-sm">
+      <div v-if="loading" class="bg-white rounded-2xl border border-slate-100 p-12 flex justify-center items-center shadow-sm">
         <div class="h-8 w-8 animate-spin rounded-full border-4 border-slate-900 border-t-transparent"></div>
       </div>
 
-      <div v-else class="space-y-6">
-        <!-- Overview Banner -->
-        <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-4">
-          <h3 class="font-extrabold text-slate-900 text-base">Status Langganan Utama</h3>
-          
-          <div class="flex flex-wrap items-center gap-3">
-            <span
-              class="inline-flex items-center rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider"
-              :class="{
-                'bg-emerald-100 text-emerald-800 border border-emerald-200': tenant?.subscription_status === 'active',
-                'bg-blue-100 text-blue-800 border border-blue-200': tenant?.subscription_status === 'trial',
-                'bg-rose-100 text-rose-800 border border-rose-200': tenant?.subscription_status === 'expired',
-              }"
-            >
-              {{ tenant?.subscription_status === 'trial' ? 'Masa Uji Coba (Trial)' : 'Berlangganan Aktif' }}
-            </span>
-            <span v-if="tenant?.subscription_status === 'trial'" class="text-xs text-slate-500 font-semibold">
-              Masa uji coba gratis berakhir pada: <strong class="text-slate-800 font-bold">{{ formatDate(tenant.trial_ends_at) }}</strong>
-            </span>
-            <span v-else class="text-xs text-slate-500 font-semibold">
-              Status Utama: <strong class="text-slate-800 font-bold">Aktif</strong>
-            </span>
+      <div v-else class="space-y-8">
+        <!-- Current Subscription Status Card -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <span class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Status Langganan Saat Ini</span>
+              <div class="flex items-center gap-2 mt-1">
+                <h3 class="text-xl font-black text-slate-900">
+                  {{ currentPlan?.name || (tenant?.plan ? tenant.plan.toUpperCase() : 'Starter POS') }}
+                </h3>
+                <span
+                  class="rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider"
+                  :class="tenant?.billing_cycle === 'yearly' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'"
+                >
+                  {{ tenant?.billing_cycle === 'yearly' ? 'Tahunan' : 'Bulanan' }}
+                </span>
+                <span
+                  class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider"
+                  :class="{
+                    'bg-emerald-100 text-emerald-800 border border-emerald-200': tenant?.subscription_status === 'active',
+                    'bg-blue-100 text-blue-800 border border-blue-200': tenant?.subscription_status === 'trial',
+                    'bg-rose-100 text-rose-800 border border-rose-200': tenant?.subscription_status === 'expired',
+                  }"
+                >
+                  {{ tenant?.subscription_status === 'trial' ? 'Masa Trial' : (tenant?.subscription_status === 'active' ? 'Aktif' : 'Kedaluwarsa') }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Expiration Notice -->
+            <div class="sm:text-right">
+              <div class="text-xs text-slate-500">
+                <span v-if="tenant?.subscription_status === 'trial'">
+                  Masa trial berakhir: <strong class="text-slate-800">{{ formatDate(tenant?.trial_ends_at) }}</strong>
+                </span>
+                <span v-else-if="tenant?.subscription_status === 'active'">
+                  Masa aktif berakhir: <strong class="text-slate-800">{{ formatDate(tenant?.subscription_ends_at) }}</strong>
+                </span>
+                <span v-else class="text-rose-600 font-bold">
+                  Masa aktif telah berakhir. Harap perpanjang paket Anda.
+                </span>
+              </div>
+              <div v-if="isActive && daysRemaining > 0" class="text-xs font-bold text-emerald-700 mt-0.5">
+                Sisa {{ daysRemaining }} hari masa aktif
+              </div>
+            </div>
           </div>
 
           <!-- Usage progress -->
-          <div class="grid gap-4 sm:grid-cols-2 pt-2">
-            <div class="border border-slate-100 rounded-xl p-4 space-y-1">
-              <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Cabang Toko Terpakai</div>
-              <div class="text-2xl font-black text-slate-900">{{ currentStores }} / {{ tenant?.max_stores }}</div>
-              <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+          <div class="grid gap-4 sm:grid-cols-2 pt-1">
+            <div class="border border-slate-100 bg-slate-50/50 rounded-xl p-4 space-y-1.5">
+              <div class="flex justify-between items-center text-xs font-bold text-slate-500">
+                <span>Cabang Toko Terpakai</span>
+                <span class="text-slate-900 font-black">{{ currentStores }} / {{ tenant?.max_stores }} Cabang</span>
+              </div>
+              <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
                 <div
-                  class="bg-slate-900 h-full rounded-full"
+                  class="bg-slate-900 h-full rounded-full transition-all duration-300"
                   :style="{ width: Math.min(100, (currentStores / (tenant?.max_stores || 1)) * 100) + '%' }"
                 ></div>
               </div>
+              <p class="text-[10px] text-slate-400">Lisensi cabang aktif: {{ activeStores }} toko</p>
             </div>
-            <div class="border border-slate-100 rounded-xl p-4 space-y-1">
-              <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Pengguna Sistem</div>
-              <div class="text-2xl font-black text-slate-900">{{ currentUsers }} / {{ tenant?.max_users }}</div>
-              <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+
+            <div class="border border-slate-100 bg-slate-50/50 rounded-xl p-4 space-y-1.5">
+              <div class="flex justify-between items-center text-xs font-bold text-slate-500">
+                <span>Pengguna Sistem Terdaftar</span>
+                <span class="text-slate-900 font-black">{{ currentUsers }} / {{ tenant?.max_users }} User</span>
+              </div>
+              <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
                 <div
-                  class="bg-slate-900 h-full rounded-full"
+                  class="bg-slate-900 h-full rounded-full transition-all duration-300"
                   :style="{ width: Math.min(100, (currentUsers / (tenant?.max_users || 1)) * 100) + '%' }"
                 ></div>
               </div>
+              <p class="text-[10px] text-slate-400">Total kasir, admin, dan supervisor di semua cabang</p>
             </div>
           </div>
         </div>
 
-        <!-- Slots List Section -->
-        <div>
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="font-extrabold text-slate-900 text-base">Detail Lisensi Slot Cabang</h3>
+        <!-- Billing Cycle Switcher -->
+        <div class="flex flex-col items-center justify-center space-y-3 pt-4">
+          <div class="text-xs font-extrabold uppercase tracking-wider text-slate-400">Pilih Siklus Pembayaran</div>
+          <div class="inline-flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-inner">
             <button
-              v-if="tenant?.subscription_status !== 'trial'"
               type="button"
-              @click="handleCheckout('add_addon')"
-              :disabled="checkoutLoading"
-              class="rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 transition-colors shadow-sm disabled:opacity-50"
+              @click="billingCycle = 'monthly'"
+              class="px-5 py-2 text-xs font-bold rounded-xl transition-all"
+              :class="billingCycle === 'monthly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
             >
-              ➕ Tambah Slot Cabang Baru ({{ money(pricing.store_addon_fee) }} / 30 Hari)
+              Bulanan
+            </button>
+            <button
+              type="button"
+              @click="billingCycle = 'yearly'"
+              class="px-5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5"
+              :class="billingCycle === 'yearly' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+            >
+              <span>Tahunan</span>
+              <span class="rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wider" :class="billingCycle === 'yearly' ? 'bg-amber-400 text-slate-950' : 'bg-amber-200 text-amber-900'">
+                Hemat 2 Bln 🔥
+              </span>
             </button>
           </div>
+        </div>
 
-          <!-- Card Grid of Slots -->
-          <div class="grid gap-4 sm:grid-cols-2">
-            <!-- Slot Card -->
-            <div
-              v-for="slot in slots"
-              :key="slot.id"
-              class="bg-white rounded-2xl border p-5 flex flex-col justify-between space-y-4 shadow-sm"
-              :class="slot.status === 'active' ? 'border-slate-100' : 'border-rose-200 bg-rose-50/20'"
-            >
-              <div class="space-y-2">
-                <div class="flex items-center justify-between">
-                  <span class="text-lg">{{ slot.slot_type === 'base' ? '🏪' : '🏬' }}</span>
-                  <span
-                    class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider"
-                    :class="slot.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'"
-                  >
-                    {{ slot.status === 'active' ? 'Aktif' : 'Expired' }}
-                  </span>
-                </div>
-                <div>
-                  <h4 class="font-extrabold text-slate-900 text-sm">{{ slot.label }}</h4>
-                  <p class="text-xs text-slate-500 mt-0.5">
-                    <span v-if="slot.status === 'active'">
-                      Berakhir pada: <strong class="text-slate-800">{{ formatDate(slot.expires_at) }}</strong>
-                      <span class="block text-[10px] text-emerald-700 font-bold mt-0.5">Sisa {{ slot.days_remaining }} hari lagi</span>
-                    </span>
-                    <span v-else class="text-rose-600 font-semibold">
-                      Lisensi telah berakhir. Cabang terkait dinonaktifkan.
-                    </span>
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                @click="handleCheckout('renew', slot.id)"
-                :disabled="checkoutLoading"
-                class="w-full rounded-xl py-2 text-xs font-bold transition-all"
-                :class="slot.status === 'active' 
-                  ? 'bg-slate-100 text-slate-800 hover:bg-slate-200' 
-                  : 'bg-rose-600 text-white hover:bg-rose-700'"
-              >
-                {{ checkoutLoading ? 'Memproses...' : `Perpanjang (${money(slot.renew_fee)})` }}
-              </button>
+        <!-- Plans Grid -->
+        <div class="grid gap-6 md:grid-cols-3 items-stretch">
+          <div
+            v-for="plan in plans"
+            :key="plan.id"
+            class="bg-white rounded-2xl border flex flex-col justify-between p-6 space-y-6 shadow-sm transition-all relative"
+            :class="[
+              plan.slug === 'pro' ? 'border-slate-900 ring-2 ring-slate-900 shadow-md' : 'border-slate-200 hover:shadow-md',
+              isCurrentPlan(plan) ? 'bg-slate-50/40' : ''
+            ]"
+          >
+            <!-- Badge Most Popular or Current Plan -->
+            <div v-if="plan.slug === 'pro'" class="absolute -top-3 left-1/2 -translate-x-1/2">
+              <span class="bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full shadow-sm">
+                Paling Populer
+              </span>
             </div>
 
-            <!-- Empty slots prompt for Trial Mode -->
-            <div 
-              v-if="tenant?.subscription_status === 'trial'"
-              class="sm:col-span-2 bg-gradient-to-br from-blue-50 to-indigo-50/50 border border-blue-100 rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-4"
-            >
-              <div class="text-3xl">🚀</div>
-              <div class="space-y-1 max-w-md">
-                <h4 class="font-extrabold text-blue-900 text-sm">Aktifkan Langganan Penuh</h4>
-                <p class="text-xs text-blue-700 leading-relaxed">
-                  Aktifkan lisensi paket dasar Anda sekarang untuk membuka akses penuh 100 pengguna sistem dan mendaftarkan cabang-cabang tambahan.
-                </p>
+            <!-- Card Top -->
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <h4 class="text-xl font-black text-slate-900">{{ plan.name }}</h4>
+                <span
+                  v-if="isCurrentPlan(plan)"
+                  class="rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider"
+                >
+                  Paket Anda
+                </span>
               </div>
+
+              <p class="text-xs text-slate-500 min-h-[34px] leading-relaxed">
+                {{ plan.tagline || 'Pilihan tepat untuk mendukung kelancaran operasional ritel toko Anda.' }}
+              </p>
+
+              <!-- Price Box -->
+              <div class="pt-3 border-t border-slate-100 space-y-1">
+                <div class="flex items-baseline gap-1">
+                  <span class="text-3xl font-black text-slate-900">
+                    {{ money(billingCycle === 'yearly' ? plan.price_yearly : plan.price_monthly) }}
+                  </span>
+                  <span class="text-xs text-slate-400 font-semibold">
+                    / {{ billingCycle === 'yearly' ? 'tahun' : 'bulan' }}
+                  </span>
+                </div>
+                <div v-if="billingCycle === 'yearly'" class="text-[11px] text-amber-600 font-bold">
+                  Setara {{ money(plan.price_yearly / 12) }} per bulan
+                </div>
+                <div v-else class="text-[11px] text-slate-400">
+                  Tagihan dibayar setiap bulan
+                </div>
+              </div>
+
+              <!-- Quotas -->
+              <div class="space-y-2 pt-2">
+                <div class="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                  <span class="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-slate-900 font-bold text-[10px]">🏢</span>
+                  <span>Hingga <strong class="text-slate-950 font-black">{{ plan.max_stores }} Cabang Toko</strong></span>
+                </div>
+                <div class="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                  <span class="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-slate-900 font-bold text-[10px]">👥</span>
+                  <span>Hingga <strong class="text-slate-950 font-black">{{ plan.max_users }} Pengguna Sistem</strong></span>
+                </div>
+              </div>
+
+              <!-- Features checklist -->
+              <div class="space-y-2 pt-3 border-t border-slate-100">
+                <div class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Semua Fitur Termasuk:</div>
+                <ul class="text-xs text-slate-600 space-y-2">
+                  <li v-for="(feat, idx) in plan.features" :key="idx" class="flex items-start gap-2">
+                    <span class="text-emerald-500 font-bold shrink-0">✓</span>
+                    <span>{{ feat }}</span>
+                  </li>
+                  <li class="flex items-start gap-2">
+                    <span class="text-emerald-500 font-bold shrink-0">✓</span>
+                    <span>Integrasi Midtrans Snap QRIS & Virtual Account</span>
+                  </li>
+                  <li class="flex items-start gap-2">
+                    <span class="text-emerald-500 font-bold shrink-0">✓</span>
+                    <span>Satu Tanggal Aktif Terpadu Semua Cabang</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- Action Button -->
+            <div class="pt-4 border-t border-slate-100">
               <button
                 type="button"
-                @click="handleCheckout('add_addon')"
+                @click="handleCheckout(plan)"
                 :disabled="checkoutLoading"
-                class="rounded-xl bg-blue-600 px-6 py-2.5 text-xs font-bold text-white hover:bg-blue-700 transition-all shadow-md hover:shadow-lg disabled:opacity-50"
+                class="w-full rounded-xl py-3 text-xs font-black transition-all shadow-sm hover:shadow disabled:opacity-50"
+                :class="[
+                  plan.slug === 'pro' 
+                    ? 'bg-slate-900 text-white hover:bg-slate-800' 
+                    : 'bg-slate-100 text-slate-900 hover:bg-slate-200',
+                  isCurrentPlan(plan) && isActive
+                    ? 'border border-emerald-500 text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100'
+                    : ''
+                ]"
               >
-                {{ checkoutLoading ? 'Menghubungkan Midtrans...' : `Aktifkan Paket Dasar (${money(pricing.base_fee)} / 30 Hari)` }}
+                <span v-if="checkoutLoading">Memproses Midtrans...</span>
+                <span v-else-if="isCurrentPlan(plan) && isActive">Perpanjang Paket Ini ({{ billingCycle === 'yearly' ? '1 Tahun' : '1 Bulan' }})</span>
+                <span v-else>Pilih & Aktifkan Paket</span>
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- FAQ / Help Note -->
+        <div class="bg-slate-50 border border-slate-200/80 rounded-2xl p-6 text-xs text-slate-600 space-y-2">
+          <h4 class="font-bold text-slate-900 text-sm">Informasi & Bantuan Berlangganan</h4>
+          <p>
+            • Pembayaran didukung penuh melalui Payment Gateway Midtrans (QRIS, GoPay, OVO, ShopeePay, dan Transfer Virtual Account BCA/Mandiri/BRI/BNI).
+          </p>
+          <p>
+            • Paket tahunan memberikan efisiensi biaya maksimal dengan diskon setara 2 bulan gratis berlangganan.
+          </p>
+          <p>
+            • Seluruh toko cabang yang terdaftar berada dalam satu paket lisensi, sehingga masa berlaku berlaku seragam dan otomatis diperpanjang secara instan.
+          </p>
         </div>
       </div>
     </div>
