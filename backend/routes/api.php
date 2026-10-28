@@ -16,11 +16,6 @@ use Illuminate\Support\Facades\Route;
 |--------------------------------------------------------------------------
 | API Routes
 |--------------------------------------------------------------------------
-|
-| Here is where you can register API routes for your application. These
-| routes are loaded by the RouteServiceProvider and all of them will
-| be assigned to the "api" middleware group. Make something great!
-|
 */
 
 Route::post('/login', [AuthController::class, 'login'])->name('login');
@@ -31,24 +26,28 @@ Route::middleware(['auth:sanctum', 'active.user', 'active.session'])->group(func
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::post('/change-password', [AuthController::class, 'changePassword']);
     Route::post('/setup-wizard', [AuthController::class, 'setupWizard']);
-    Route::get('/me', fn () => auth()->user()->load(['store', 'tenant']));
+    Route::get('/me', function () {
+        $user = auth()->user();
+        if ($user && $user->tenant) {
+            $user->tenant->checkAndSyncExpiredStatus();
+        }
+        return $user->load(['store', 'tenant']);
+    });
 
     // Tenant / Multi-store switching for owners
     Route::get('/tenant/stores', [\App\Http\Controllers\Api\TenantController::class, 'getStores']);
     Route::post('/tenant/switch-store', [\App\Http\Controllers\Api\TenantController::class, 'switchStore']);
 
-    // Cashier Session shift management
+    // Cashier Sessions (Read & Close session can still happen if expired)
     Route::get('/cashier-sessions', [\App\Http\Controllers\Api\CashierSessionController::class, 'index']);
     Route::get('/cashier-sessions/active', [\App\Http\Controllers\Api\CashierSessionController::class, 'getActive']);
     Route::get('/cashier-sessions/active/summary', [\App\Http\Controllers\Api\CashierSessionController::class, 'getSummary']);
-    Route::post('/cashier-sessions/open', [\App\Http\Controllers\Api\CashierSessionController::class, 'open']);
     Route::post('/cashier-sessions/close', [\App\Http\Controllers\Api\CashierSessionController::class, 'close']);
 
-    // Cashier Cash Mutations
+    // Cashier Cash Mutations read-only
     Route::get('/cashier-mutations', [\App\Http\Controllers\Api\CashierCashMutationController::class, 'index']);
-    Route::post('/cashier-mutations', [\App\Http\Controllers\Api\CashierCashMutationController::class, 'store']);
 
-    // Kas Besar - balance accessible to all authenticated users
+    // Kas Besar - balance
     Route::get('/kas-besar/balance', [\App\Http\Controllers\Api\GeneralCashController::class, 'balance']);
 
     // Read-only routes for Cashiers & all authenticated users
@@ -59,14 +58,21 @@ Route::middleware(['auth:sanctum', 'active.user', 'active.session'])->group(func
     Route::get('/suppliers', [SupplierController::class, 'index']);
     Route::get('/suppliers/{supplier}', [SupplierController::class, 'show']);
 
-    Route::apiResource('transactions', TransactionController::class)->only(['index', 'store', 'show']);
+    Route::get('/transactions', [TransactionController::class, 'index']);
+    Route::get('/transactions/{transaction}', [TransactionController::class, 'show']);
     Route::get('/reports/daily-summary', [ReportController::class, 'dailySummary']);
+
+    // Operations requiring active subscription and store license (Open Shift, Cash Mutation, POS Transactions)
+    Route::middleware('active.subscription')->group(function () {
+        Route::post('/cashier-sessions/open', [\App\Http\Controllers\Api\CashierSessionController::class, 'open']);
+        Route::post('/cashier-mutations', [\App\Http\Controllers\Api\CashierCashMutationController::class, 'store']);
+        Route::post('/transactions', [TransactionController::class, 'store']);
+    });
 
     // Write access & management for admin, owner, and superadmin
     Route::middleware('role:admin,owner,superadmin')->group(function () {
-        // Kas Besar
+        // Kas Besar index
         Route::get('/kas-besar', [\App\Http\Controllers\Api\GeneralCashController::class, 'index']);
-        Route::post('/kas-besar', [\App\Http\Controllers\Api\GeneralCashController::class, 'store']);
 
         // Laporan Keuangan (admin, owner, superadmin only)
         Route::get('/reports/sales-by-cashier', [ReportController::class, 'salesByCashier']);
@@ -79,27 +85,49 @@ Route::middleware(['auth:sanctum', 'active.user', 'active.session'])->group(func
         Route::get('/reports/profit-loss',      [ReportController::class, 'profitLoss']);
         Route::get('/reports/purchase-summary', [ReportController::class, 'purchaseSummary']);
 
-        Route::post('/products', [ProductController::class, 'store']);
-        Route::put('/products/{product}', [ProductController::class, 'update']);
-        Route::delete('/products/{product}', [ProductController::class, 'destroy']);
-        Route::post('/products/import-csv', [ProductController::class, 'importCsv']);
         Route::get('/products-expiry', [ProductController::class, 'expiryWarnings']);
-        Route::post('/products/upload-image', [ProductController::class, 'uploadImage']);
-
-        Route::post('/categories', [CategoryController::class, 'store']);
-        Route::put('/categories/{category}', [CategoryController::class, 'update']);
-        Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
-
-        Route::post('/suppliers', [SupplierController::class, 'store']);
-        Route::put('/suppliers/{supplier}', [SupplierController::class, 'update']);
-        Route::delete('/suppliers/{supplier}', [SupplierController::class, 'destroy']);
-
-        Route::apiResource('users', UserController::class);
-        Route::apiResource('purchases', PurchaseController::class)->only(['index', 'store', 'show', 'destroy']);
-        Route::post('/purchases/{purchase}/pay', [PurchaseController::class, 'payDebt']);
+        Route::get('/purchases', [PurchaseController::class, 'index']);
+        Route::get('/purchases/{purchase}', [PurchaseController::class, 'show']);
+        Route::get('/users', [UserController::class, 'index']);
+        Route::get('/users/{user}', [UserController::class, 'show']);
         Route::get('/store', [StoreController::class, 'show']);
-        Route::post('/store/activate-license', [StoreController::class, 'activateLicense']);
         Route::put('/settings/store', [SettingsController::class, 'updateStore']);
+
+        // Operations that modify data and require active subscription
+        Route::middleware('active.subscription')->group(function () {
+            // Kas Besar store
+            Route::post('/kas-besar', [\App\Http\Controllers\Api\GeneralCashController::class, 'store']);
+
+            // Products
+            Route::post('/products', [ProductController::class, 'store']);
+            Route::put('/products/{product}', [ProductController::class, 'update']);
+            Route::delete('/products/{product}', [ProductController::class, 'destroy']);
+            Route::post('/products/import-csv', [ProductController::class, 'importCsv']);
+            Route::post('/products/upload-image', [ProductController::class, 'uploadImage']);
+
+            // Categories
+            Route::post('/categories', [CategoryController::class, 'store']);
+            Route::put('/categories/{category}', [CategoryController::class, 'update']);
+            Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
+
+            // Suppliers
+            Route::post('/suppliers', [SupplierController::class, 'store']);
+            Route::put('/suppliers/{supplier}', [SupplierController::class, 'update']);
+            Route::delete('/suppliers/{supplier}', [SupplierController::class, 'destroy']);
+
+            // Users
+            Route::post('/users', [UserController::class, 'store']);
+            Route::put('/users/{user}', [UserController::class, 'update']);
+            Route::delete('/users/{user}', [UserController::class, 'destroy']);
+
+            // Purchases
+            Route::post('/purchases', [PurchaseController::class, 'store']);
+            Route::delete('/purchases/{purchase}', [PurchaseController::class, 'destroy']);
+            Route::post('/purchases/{purchase}/pay', [PurchaseController::class, 'payDebt']);
+
+            // Store license activation
+            Route::post('/store/activate-license', [StoreController::class, 'activateLicense']);
+        });
 
         // Superadmin-only routes
         Route::middleware('role:superadmin')->group(function () {
@@ -111,7 +139,7 @@ Route::middleware(['auth:sanctum', 'active.user', 'active.session'])->group(func
             Route::post('/superadmin/tenants/{tenant}/subscription', [\App\Http\Controllers\Api\SuperadminController::class, 'updateTenantSubscription']);
         });
 
-        // Owner-only routes
+        // Owner-only routes (Billing & renewal)
         Route::middleware('role:owner')->group(function () {
             Route::put('/tenant', [\App\Http\Controllers\Api\TenantController::class, 'updateTenant']);
             Route::post('/tenant/stores', [\App\Http\Controllers\Api\TenantController::class, 'createStore']);

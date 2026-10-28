@@ -373,6 +373,33 @@ const mobileBottomItems = computed<BottomItem[]>(() => {
             </button>
           </div>
         </div>
+        
+        <!-- Subscription Expired Banner -->
+        <div
+          v-if="!auth.isSuperAdmin && auth.user?.tenant?.subscription_status === 'expired'"
+          class="mb-6 rounded-2xl border border-rose-200 bg-rose-50/90 p-4 shadow-sm"
+        >
+          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div class="flex items-start sm:items-center gap-3">
+              <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-white font-black text-lg">
+                !
+              </span>
+              <div>
+                <h4 class="font-bold text-rose-950 text-sm">Masa Berlangganan Toko Telah Berakhir</h4>
+                <p class="text-xs text-rose-700 mt-0.5">
+                  Transaksi penjualan, buka kasir, penambahan produk, dan mutasi kas dinonaktifkan sampai langganan diperpanjang.
+                </p>
+              </div>
+            </div>
+            <RouterLink
+              v-if="auth.isOwner"
+              to="/billing"
+              class="shrink-0 inline-flex items-center rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-rose-700 transition"
+            >
+              Perpanjang Sekarang &rarr;
+            </RouterLink>
+          </div>
+        </div>
         <slot />
       </main>
     </div>

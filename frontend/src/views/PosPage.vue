@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import api from '../services/api'
+import { useAuthStore } from '../stores/auth'
 
 type CartLine = {
   product_id: number
@@ -33,6 +34,8 @@ const paymentMethod = ref<'cash' | 'transfer' | 'qris' | 'card'>('cash')
 const lastTransaction = ref<any>(null)
 const showReceipt = ref(false)
 const showMobileCart = ref(false)
+const auth = useAuthStore()
+const isSubscriptionExpired = computed(() => !auth.isSuperAdmin && auth.user?.tenant?.subscription_status === 'expired')
 
 const money = (n: number) =>
   new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(Math.round(n))
@@ -187,6 +190,7 @@ watch([total, paymentMethod], () => {
 })
 
 const canCheckout = computed(() => {
+  if (isSubscriptionExpired.value) return false
   if (!cart.value.length || checkoutLoading.value) return false
   const paid = paidAmount.value
   if (paid == null || paid < total.value) return false
@@ -419,6 +423,10 @@ const printThermal = (trx: any) => {
 }
 
 const checkout = async () => {
+  if (isSubscriptionExpired.value) {
+    error.value = 'Masa langganan toko Anda telah berakhir. Transaksi kasir dinonaktifkan.'
+    return
+  }
   if (!canCheckout.value) {
     if (cart.value.some((r) => (stockFor(r.product_id) ?? r.maxStock) < r.quantity)) {
       error.value = 'Stok tidak cukup untuk salah satu item. Perbarui keranjang.'
@@ -792,7 +800,7 @@ onMounted(() => {
               :disabled="!canCheckout"
               @click="checkout"
             >
-              {{ checkoutLoading ? 'Menyimpan…' : 'BAYAR SEKARANG' }}
+              {{ isSubscriptionExpired ? 'LANGGANAN KEDALUWARSA' : checkoutLoading ? 'Menyimpan…' : 'BAYAR SEKARANG' }}
             </button>
           </div>
         </div>
@@ -947,7 +955,7 @@ onMounted(() => {
               :disabled="!canCheckout"
               @click="checkout"
             >
-              {{ checkoutLoading ? 'Menyimpan…' : 'BAYAR & SELESAIKAN' }}
+              {{ isSubscriptionExpired ? 'LANGGANAN KEDALUWARSA' : checkoutLoading ? 'Menyimpan…' : 'BAYAR & SELESAIKAN' }}
             </button>
           </div>
         </div>
