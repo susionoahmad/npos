@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import api from '../services/api'
 
@@ -28,11 +28,21 @@ const plans = ref<Plan[]>([])
 const currentStores = ref(0)
 const activeStores = ref(0)
 const currentUsers = ref(0)
+const maxStoresData = ref(1)
+const maxUsersData = ref(3)
 const daysRemaining = ref(0)
 const isActive = ref(true)
 
 // Billing Cycle Switcher: monthly vs yearly (hemat 2 bulan)
 const billingCycle = ref<'monthly' | 'yearly'>('yearly')
+
+const effectiveMaxStores = computed(() => {
+  return currentPlan.value?.max_stores || maxStoresData.value || tenant.value?.max_stores || 1
+})
+
+const effectiveMaxUsers = computed(() => {
+  return currentPlan.value?.max_users || maxUsersData.value || tenant.value?.max_users || 3
+})
 
 const money = (val: number) => {
   return new Intl.NumberFormat('id-ID', {
@@ -58,6 +68,8 @@ const fetchBilling = async () => {
     currentStores.value = data.current_stores || 0
     activeStores.value = data.active_stores || 0
     currentUsers.value = data.current_users || 0
+    maxStoresData.value = data.max_stores || data.current_plan?.max_stores || 1
+    maxUsersData.value = data.max_users || data.current_plan?.max_users || 3
     daysRemaining.value = data.days_remaining || 0
     isActive.value = data.is_active
 
@@ -222,32 +234,46 @@ const isCurrentPlan = (plan: Plan) => {
 
           <!-- Usage progress -->
           <div class="grid gap-4 sm:grid-cols-2 pt-1">
-            <div class="border border-slate-100 bg-slate-50/50 rounded-xl p-4 space-y-1.5">
+            <div class="border border-slate-100 bg-slate-50/50 rounded-xl p-4 space-y-2">
               <div class="flex justify-between items-center text-xs font-bold text-slate-500">
                 <span>Cabang Toko Terpakai</span>
-                <span class="text-slate-900 font-black">{{ currentStores }} / {{ tenant?.max_stores }} Cabang</span>
+                <span class="text-slate-900 font-black">{{ currentStores }} / {{ effectiveMaxStores }} Cabang</span>
               </div>
               <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
                 <div
-                  class="bg-slate-900 h-full rounded-full transition-all duration-300"
-                  :style="{ width: Math.min(100, (currentStores / (tenant?.max_stores || 1)) * 100) + '%' }"
+                  class="h-full rounded-full transition-all duration-300"
+                  :class="currentStores > effectiveMaxStores ? 'bg-amber-500' : 'bg-slate-900'"
+                  :style="{ width: Math.min(100, (currentStores / effectiveMaxStores) * 100) + '%' }"
                 ></div>
               </div>
-              <p class="text-[10px] text-slate-400">Lisensi cabang aktif: {{ activeStores }} toko</p>
+              <div class="space-y-1">
+                <p class="text-[11px]" :class="isActive ? 'text-slate-500 font-medium' : 'text-rose-600 font-semibold'">
+                  {{ isActive ? `Lisensi cabang aktif: ${activeStores} toko` : 'Semua cabang dinonaktifkan sementara karena masa langganan kedaluwarsa' }}
+                </p>
+                <p v-if="currentStores > effectiveMaxStores" class="text-[10px] text-amber-700 bg-amber-50 rounded-md p-1.5 font-bold border border-amber-200/60">
+                  ⚠️ Jumlah cabang terdaftar ({{ currentStores }}) melebihi kuota paket saat ini (Maks. {{ effectiveMaxStores }} cabang). Disarankan upgrade ke Paket Pro untuk mengaktifkan seluruh cabang.
+                </p>
+              </div>
             </div>
 
-            <div class="border border-slate-100 bg-slate-50/50 rounded-xl p-4 space-y-1.5">
+            <div class="border border-slate-100 bg-slate-50/50 rounded-xl p-4 space-y-2">
               <div class="flex justify-between items-center text-xs font-bold text-slate-500">
                 <span>Pengguna Sistem Terdaftar</span>
-                <span class="text-slate-900 font-black">{{ currentUsers }} / {{ tenant?.max_users }} User</span>
+                <span class="text-slate-900 font-black">{{ currentUsers }} / {{ effectiveMaxUsers }} User</span>
               </div>
               <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
                 <div
-                  class="bg-slate-900 h-full rounded-full transition-all duration-300"
-                  :style="{ width: Math.min(100, (currentUsers / (tenant?.max_users || 1)) * 100) + '%' }"
+                  class="h-full rounded-full transition-all duration-300"
+                  :class="currentUsers > effectiveMaxUsers ? 'bg-amber-500' : 'bg-slate-900'"
+                  :style="{ width: Math.min(100, (currentUsers / effectiveMaxUsers) * 100) + '%' }"
                 ></div>
               </div>
-              <p class="text-[10px] text-slate-400">Total kasir, admin, dan supervisor di semua cabang</p>
+              <div class="space-y-1">
+                <p class="text-[11px] text-slate-400">Total kasir, admin, dan supervisor di semua cabang</p>
+                <p v-if="currentUsers > effectiveMaxUsers" class="text-[10px] text-amber-700 bg-amber-50 rounded-md p-1.5 font-bold border border-amber-200/60">
+                  ⚠️ Jumlah pengguna terdaftar ({{ currentUsers }}) melebihi batas paket (Maks. {{ effectiveMaxUsers }} user).
+                </p>
+              </div>
             </div>
           </div>
         </div>

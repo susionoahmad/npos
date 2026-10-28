@@ -28,10 +28,6 @@ class SubscriptionController extends Controller
         // Sync expired status if needed
         $tenant->checkAndSyncExpiredStatus();
 
-        $currentStores = $tenant->stores()->count();
-        $activeStores  = $tenant->stores()->where('is_license_activated', true)->count();
-        $currentUsers  = $tenant->users()->count();
-
         // Load all active subscription plans
         $plans = SubscriptionPlan::active()
             ->orderBy('sort_order', 'asc')
@@ -41,6 +37,22 @@ class SubscriptionController extends Controller
         // Determine current plan details
         $currentPlanSlug = $tenant->plan ?: 'starter';
         $currentPlan = SubscriptionPlan::where('slug', $currentPlanSlug)->first();
+
+        // Determine effective limits based on the assigned plan
+        $effectiveMaxStores = $currentPlan ? $currentPlan->max_stores : ($tenant->max_stores ?: 1);
+        $effectiveMaxUsers  = $currentPlan ? $currentPlan->max_users : ($tenant->max_users ?: 3);
+
+        // Auto-heal / sync database tenant limits if out of sync with current plan
+        if ($currentPlan && ($tenant->max_stores != $effectiveMaxStores || $tenant->max_users != $effectiveMaxUsers)) {
+            $tenant->update([
+                'max_stores' => $effectiveMaxStores,
+                'max_users'  => $effectiveMaxUsers,
+            ]);
+        }
+
+        $currentStores = $tenant->stores()->count();
+        $activeStores  = $tenant->stores()->where('is_license_activated', true)->count();
+        $currentUsers  = $tenant->users()->count();
 
         // Calculate days remaining
         $daysRemaining = 0;
@@ -59,7 +71,9 @@ class SubscriptionController extends Controller
             'plans'           => $plans,
             'current_stores'  => $currentStores,
             'active_stores'   => $activeStores,
+            'max_stores'      => $effectiveMaxStores,
             'current_users'   => $currentUsers,
+            'max_users'       => $effectiveMaxUsers,
             'days_remaining'  => $daysRemaining,
             'is_active'       => $isActive,
         ]);
