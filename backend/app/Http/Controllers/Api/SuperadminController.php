@@ -6,18 +6,59 @@ use App\Http\Controllers\Controller;
 use App\Models\Tenant;
 use App\Models\Store;
 use App\Models\User;
+use App\Models\TenantSubscriptionSlot;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-
 use App\Models\SystemSetting;
 
 class SuperadminController extends Controller
 {
     /**
+     * Helper to sync all expired tenants and their stores/slots
+     */
+    public static function syncExpiredTenants(): void
+    {
+        $now = now();
+
+        // 1. Tenant dengan status active yang subscription_ends_at sudah lewat
+        $expiredActiveTenants = Tenant::where('subscription_status', 'active')
+            ->whereNotNull('subscription_ends_at')
+            ->where('subscription_ends_at', '<', $now)
+            ->get();
+
+        foreach ($expiredActiveTenants as $tenant) {
+            $tenant->update(['subscription_status' => 'expired']);
+            $tenant->stores()->update(['is_license_activated' => false]);
+            $tenant->subscriptionSlots()
+                ->where('status', 'active')
+                ->where('expires_at', '<', $now)
+                ->update(['status' => 'expired']);
+        }
+
+        // 2. Tenant dengan status trial yang trial_ends_at sudah lewat
+        $expiredTrialTenants = Tenant::where('subscription_status', 'trial')
+            ->whereNotNull('trial_ends_at')
+            ->where('trial_ends_at', '<', $now)
+            ->get();
+
+        foreach ($expiredTrialTenants as $tenant) {
+            $tenant->update(['subscription_status' => 'expired']);
+            $tenant->stores()->update(['is_license_activated' => false]);
+        }
+
+        // 3. Slot langganan aktif yang telah kedaluwarsa
+        TenantSubscriptionSlot::where('status', 'active')
+            ->where('expires_at', '<', $now)
+            ->update(['status' => 'expired']);
+    }
+
+    /**
      * Get list of all tenants with counts and relations
      */
     public function getTenants()
     {
+        self::syncExpiredTenants();
+
         return Tenant::with(['stores', 'users'])
             ->withCount(['stores', 'users'])
             ->get();
@@ -155,6 +196,24 @@ class SuperadminController extends Controller
         ]);
 
         $tenant->update($payload);
+
+        // Jika status diubah menjadi expired atau cancelled, nonaktifkan lisensi toko
+        if (in_array($payload['subscription_status'], ['expired', 'cancelled'])) {
+            $tenant->stores()->update(['is_license_activated' => false]);
+            $tenant->subscriptionSlots()->update(['status' => 'expired']);
+        } elseif ($payload['subscription_status'] === 'active') {
+            // Jika status diaktifkan kembali dan belum ada lisensi aktif, aktifkan toko utama
+            $hasActiveStore = $tenant->stores()->where('is_license_activated', true)->exists();
+            if (!$hasActiveStore) {
+                $mainStore = $tenant->stores()->first();
+                if ($mainStore) {
+                    $mainStore->update([
+                        'is_license_activated' => true,
+                        'license_activated_at' => now(),
+                    ]);
+                }
+            }
+        }
 
         return response()->json([
             'message' => 'Detail berlangganan tenant berhasil diperbarui.',

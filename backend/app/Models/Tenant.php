@@ -19,6 +19,13 @@ class Tenant extends Model
         'max_users',
     ];
 
+    protected $casts = [
+        'trial_ends_at' => 'datetime',
+        'subscription_ends_at' => 'datetime',
+        'max_stores' => 'integer',
+        'max_users' => 'integer',
+    ];
+
     public function stores(): HasMany
     {
         return $this->hasMany(Store::class);
@@ -50,18 +57,59 @@ class Tenant extends Model
     }
 
     /**
-     * Check if the base (slot 1) is active — required for all operations.
+     * Check if the base (slot 1) is active - required for all operations.
      */
     public function isBaseSlotActive(): bool
     {
+        $now = now();
+
         if ($this->subscription_status === 'trial') {
-            return $this->trial_ends_at ? now()->lt($this->trial_ends_at) : true;
+            return $this->trial_ends_at ? $now->lt($this->trial_ends_at) : true;
         }
 
-        return $this->subscriptionSlots()
-            ->where('slot_type', 'base')
-            ->active()
-            ->exists();
+        if (in_array($this->subscription_status, ['expired', 'cancelled'])) {
+            return false;
+        }
+
+        if ($this->subscription_ends_at && $now->gt($this->subscription_ends_at)) {
+            return false;
+        }
+
+        if ($this->subscriptionSlots()->exists()) {
+            return $this->subscriptionSlots()
+                ->where('slot_type', 'base')
+                ->active()
+                ->exists();
+        }
+
+        return $this->subscription_status === 'active';
+    }
+
+    /**
+     * Check and sync expired status dynamically.
+     */
+    public function checkAndSyncExpiredStatus(): bool
+    {
+        $now = now();
+        $shouldExpire = false;
+
+        if ($this->subscription_status === 'trial' && $this->trial_ends_at && $now->gt($this->trial_ends_at)) {
+            $shouldExpire = true;
+        } elseif ($this->subscription_status === 'active' && $this->subscription_ends_at && $now->gt($this->subscription_ends_at)) {
+            $shouldExpire = true;
+        }
+
+        if ($shouldExpire) {
+            $this->update(['subscription_status' => 'expired']);
+            $this->stores()->update(['is_license_activated' => false]);
+            $this->subscriptionSlots()
+                ->where('status', 'active')
+                ->where('expires_at', '<', $now)
+                ->update(['status' => 'expired']);
+            return true;
+        }
+
+        return false;
     }
 
     /**

@@ -9,7 +9,11 @@ class StoreController extends Controller
 {
     public function show()
     {
-        return auth()->user()->store;
+        $user = auth()->user();
+        if ($user && $user->tenant) {
+            $user->tenant->checkAndSyncExpiredStatus();
+        }
+        return $user?->store?->fresh();
     }
 
     public function activateLicense(Request $request)
@@ -24,16 +28,18 @@ class StoreController extends Controller
             abort_unless($store->tenant_id === $user->tenant_id, 403);
         }
 
-        if ($store->is_license_activated) {
-            return response()->json(['message' => 'Lisensi toko ini sudah aktif.'], 422);
-        }
-
         $tenant = $store->tenant;
         if ($tenant) {
+            $tenant->checkAndSyncExpiredStatus();
+
             if (!$tenant->isBaseSlotActive()) {
                 return response()->json([
                     'message' => 'Masa langganan dasar Anda telah berakhir. Silakan lakukan pembayaran terlebih dahulu.'
                 ], 422);
+            }
+
+            if ($store->is_license_activated) {
+                return response()->json(['message' => 'Lisensi toko ini sudah aktif.'], 422);
             }
             
             $activeLicensesCount = \App\Models\Store::where('tenant_id', $tenant->id)
