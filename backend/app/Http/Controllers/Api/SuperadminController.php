@@ -59,9 +59,14 @@ class SuperadminController extends Controller
     {
         self::syncExpiredTenants();
 
-        return Tenant::with(['stores', 'users'])
-            ->withCount(['stores', 'users'])
-            ->get();
+        return Tenant::with([
+            'stores' => function ($query) {
+                $query->withCount('users')->with(['users:id,store_id,tenant_id,name,email,role,is_active']);
+            },
+            'users:id,tenant_id,store_id,name,email,role,is_active'
+        ])
+        ->withCount(['stores', 'users'])
+        ->get();
     }
 
     /**
